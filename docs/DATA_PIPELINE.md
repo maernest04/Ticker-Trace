@@ -1,0 +1,144 @@
+# Data Pipeline
+
+## Objective
+
+Define how market events enter the system, become trusted internal events, update distributed state, reach storage, and appear in the UI.
+
+## Event Lifecycle
+
+```text
+Receive -> Validate -> Normalize -> Partition -> Publish -> Process -> Cache -> Persist -> Broadcast
+```
+
+## Ingestion
+
+### Private Live Source
+
+- **Provider:** Alpaca Basic IEX stock feed
+- **Protocol:** Authenticated WebSocket
+- **Events:** Trades, quotes, and provider status/correction messages needed by the selected symbols
+- **Initial symbols:** Operator-configured list of up to 10 liquid U.S. equities
+- **Timestamps:** Preserve provider timestamp and add local receive and publish timestamps
+- **Connection behavior:** One ingestion connection with heartbeat/freshness monitoring and bounded reconnect backoff
+- **Restrictions:** Live vendor data remains private and is never enabled in the public deployment
+
+### Public Replay Source
+
+- Generated deterministic fixtures are the default.
+- Any external replay dataset must have documented redistribution rights before inclusion.
+- Fixtures cover normal, volatile, illiquid, gap, duplicate, stale, malformed, and worker-failure scenarios.
+- Replay uses the same normalized events and partitioning logic as live ingestion.
+
+## Normalized Event Envelope
+
+Every internal event should include:
+
+- Unique event identifier
+- Event type and schema version
+- Instrument identifier
+- Provider event timestamp
+- Local ingestion timestamp
+- Source and source sequence number when available
+- Trace or correlation identifier
+- Typed payload
+- Run mode and replay/session identifier
+- Partition identifier
+
+Initial event types:
+
+- `market.quote.v1`
+- `market.trade.v1`
+- `order.submitted.v1`
+- `order.activated.v1`
+- `order.cancelled.v1`
+- `execution.fill.v1`
+- `order.state_changed.v1`
+- `replay.state_changed.v1`
+- `pipeline.dead_lettered.v1`
+
+## Ordering and Delivery
+
+- Ordering is required per symbol within a run.
+- A stable symbol hash selects one of a fixed set of Redis Stream partitions.
+- Market events and order commands for the same symbol enter the same partition.
+- The Redis Stream entry order is the canonical processing order after ingestion.
+- Provider timestamps remain available for freshness checks and explanation.
+- Stale provider events are persisted and counted but do not replace newer cached state.
+- Every event has a deterministic idempotency identifier; every fill has a deterministic identifier derived from order and triggering event.
+- Delivery is at least once. A worker records its idempotency decision before acknowledging an entry.
+- Transient failures remain pending and are retried with a bounded count.
+- Invalid or permanently failing events enter a dead-letter stream with their reason and original identifier.
+
+## Stream Consumers
+
+List each consumer and the state it owns.
+
+| Consumer | Input | Output | Partition Key | Cached State |
+| --- | --- | --- | --- | --- |
+| Engine | Market events and order commands | Order transitions, fills, explanations | Symbol | Market and order state |
+| Persistence | All normalized and derived events | PostgreSQL rows | Stream partition | Batch cursor only |
+| WebSocket publisher | Materialized state changes | Coalesced client messages | Replay/session ID | Connection state |
+| Metrics collector | Service and stream metrics | Prometheus-compatible samples | Service/partition | Rolling counters |
+
+## Cache and Persistence
+
+- Current, frequently read state belongs in Redis.
+- Durable events and historical results belong in PostgreSQL.
+- Cached state must be rebuildable.
+- Persistence uses bounded batches based on row count and maximum wait time.
+- The persistence worker acknowledges only after a successful database transaction.
+- TimescaleDB remains a measured future optimization rather than an MVP dependency.
+
+Initial durable entities:
+
+- Replay session
+- Normalized market event
+- Simulated order
+- Fill
+- Order-state transition and explanation
+- Benchmark run and result
+
+## Replay
+
+Replay uses the same normalized event model and engine as live processing.
+
+- Generated fixtures are selected by dataset identifier and immutable version.
+- Source event timing and ordering metadata are preserved.
+- Playback supports 1x, 10x, and maximum safe speed.
+- Every run receives isolated stream and cache namespaces.
+- Identical dataset version, order commands, worker count, and engine version must produce identical fills and final state.
+- Public replay never reads private recorded vendor data.
+
+## Execution Calculations
+
+- **Weighted average fill price:** quantity-weighted mean of fill prices.
+- **Fill rate:** filled quantity divided by submitted quantity.
+- **Time to first fill:** first fill event time minus order activation time.
+- **Time to completion:** final fill event time minus order activation time.
+- **Spread cost:** signed difference between fill price and arrival midpoint, reported in currency and basis points.
+- **Latency impact:** difference between the configured-latency result and the same replayed order with zero configured latency.
+
+Calculations must identify the quote and event timestamps used. Results with incomplete fills remain explicitly incomplete rather than extrapolated.
+
+## Backpressure
+
+- Queue depth, oldest pending age, and consumer lag are measured per partition and group.
+- Ingestion pauses when the persistence backlog reaches a configured safety threshold.
+- The API rejects new orders when engine lag or market-data freshness exceeds its threshold.
+- Browser updates are coalesced to a bounded frequency; slow clients receive the newest snapshot instead of every intermediate UI update.
+- Replay maximum speed adapts to lag rather than dropping events.
+- Threshold values are configuration, recorded with benchmark results, and tuned during load testing.
+
+## Pipeline Metrics
+
+- Events received, accepted, rejected, and processed
+- Events processed per second
+- End-to-end and stage-level latency percentiles
+- Queue depth and consumer lag
+- Duplicate and out-of-order event counts
+- Cache hit rate
+- Database batch size and write duration
+- Reconnects, retries, and dead-letter events
+- Worker claims and recovery duration
+- Fill count and duplicate-fill suppression count
+- Browser snapshot rate and delivery age
