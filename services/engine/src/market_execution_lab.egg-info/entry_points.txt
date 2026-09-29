@@ -1,0 +1,2 @@
+[console_scripts]
+market-execution-lab = market_execution_lab.cli:main

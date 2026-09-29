@@ -43,20 +43,20 @@ The project is ready to enter Phase 1. No implementation work has started.
 
 ### 1A — Foundation and Contracts
 
-- [ ] Establish the repository structure for frontend, Python services, tests, and infrastructure.
-- [ ] Implement generated quote/trade fixtures before using vendor credentials.
-- [ ] Define typed envelopes for quotes, trades, order commands, fills, and state changes.
-- [ ] Add tests for valid and invalid events and orders.
+- [x] Establish the repository structure for frontend, Python services, tests, and infrastructure.
+- [x] Implement generated quote/trade fixtures before using vendor credentials.
+- [x] Define typed envelopes for quotes, trades, order commands, fills, and state changes.
+- [x] Add tests for valid and invalid events and orders.
 
 **Verification:** Fixtures load successfully; contracts reject invalid inputs; all contract tests pass.
 
 ### 1B — Pure Execution Core
 
-- [ ] Implement an in-memory market-state model.
-- [ ] Implement market and limit order activation rules.
-- [ ] Implement partial fills, artificial latency, and execution calculations.
-- [ ] Implement deterministic event and fill identifiers.
-- [ ] Test complete, partial, unfilled, delayed, duplicate, and stale-event scenarios.
+- [x] Implement an in-memory market-state model.
+- [x] Implement market and limit order activation rules.
+- [x] Implement partial fills, artificial latency, and execution calculations.
+- [x] Implement deterministic event and fill identifiers.
+- [x] Test complete, partial, unfilled, delayed, duplicate, and stale-event scenarios.
 
 **Verification:** Every fixture produces the expected fill sequence, and three identical in-memory replays produce identical results.
 
