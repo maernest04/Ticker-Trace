@@ -1,10 +1,18 @@
 README.md
 pyproject.toml
 services/engine/src/market_execution_lab/__init__.py
+services/engine/src/market_execution_lab/alpaca.py
 services/engine/src/market_execution_lab/cli.py
 services/engine/src/market_execution_lab/engine.py
+services/engine/src/market_execution_lab/engine_service.py
 services/engine/src/market_execution_lab/fixtures.py
+services/engine/src/market_execution_lab/ingestion_service.py
 services/engine/src/market_execution_lab/models.py
+services/engine/src/market_execution_lab/observability.py
+services/engine/src/market_execution_lab/operations_service.py
+services/engine/src/market_execution_lab/persistence_service.py
+services/engine/src/market_execution_lab/pipeline.py
+services/engine/src/market_execution_lab/replay_service.py
 services/engine/src/market_execution_lab/storage.py
 services/engine/src/market_execution_lab/streaming.py
 services/engine/src/market_execution_lab.egg-info/PKG-INFO
@@ -13,6 +21,8 @@ services/engine/src/market_execution_lab.egg-info/dependency_links.txt
 services/engine/src/market_execution_lab.egg-info/entry_points.txt
 services/engine/src/market_execution_lab.egg-info/requires.txt
 services/engine/src/market_execution_lab.egg-info/top_level.txt
+tests/test_alpaca.py
 tests/test_engine.py
 tests/test_fixtures.py
 tests/test_models.py
+tests/test_streaming_integration.py

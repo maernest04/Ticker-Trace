@@ -92,9 +92,9 @@ Phase 1 is complete.
 
 ### 2C — Observability and Live Adapter
 
-- [ ] Add health/readiness checks, structured logs, correlation IDs, and metrics.
-- [ ] Record throughput, queue depth, and processing latency.
-- [ ] Connect the private Alpaca IEX adapter after its normalized-event contract matches replay fixtures.
+- [x] Add health/readiness checks, structured logs, correlation IDs, and metrics.
+- [x] Record throughput, queue depth, and processing latency.
+- [x] Connect the private Alpaca IEX adapter after its normalized-event contract matches replay fixtures.
 
 **Verification:** The pipeline survives a worker kill during replay, completes all events, produces the same state and fills as a failure-free run, and reports its health and lag.
 

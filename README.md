@@ -32,7 +32,9 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Approve the MVP scope and non-goals.
 - [x] Select the initial technology stack.
 - [x] Define architecture, data flow, UI, deployment, and test boundaries.
-- [ ] Begin implementation.
+- [x] Complete the core streaming pipeline.
+- [x] Add operational health, readiness, structured logs, and pipeline metrics.
+- [x] Add a credential-gated private Alpaca IEX ingestion adapter.
 
 ## Technology Stack
 
@@ -54,4 +56,4 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 
 ## Implementation Gate
 
-Planning is complete. Implementation begins with Phase 1 in `docs/IMPLEMENTATION_PLAN.md`: a command-line ingestion and deterministic replay proof of concept. No application code has been created yet.
+Phases 1 and 2 are complete. The next phase exposes the pipeline through the application API.

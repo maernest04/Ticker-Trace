@@ -1,8 +1,12 @@
 alembic<2,>=1.14
+fastapi<1,>=0.115
 pydantic<3,>=2.10
 psycopg[binary]<4,>=3.2
 redis<6,>=5
 SQLAlchemy<3,>=2.0
+uvicorn<1,>=0.34
+websockets<16,>=14
 
 [dev]
+httpx<1,>=0.28
 pytest<10,>=9

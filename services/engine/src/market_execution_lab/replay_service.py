@@ -7,10 +7,12 @@ from uuid import UUID, uuid4
 from redis import Redis
 
 from market_execution_lab.fixtures import generated_scenarios
+from market_execution_lab.observability import configure_logging
 from market_execution_lab.pipeline import MAX_QUEUE_DEPTH, publish_replay
 
 
 def main() -> None:
+    configure_logging()
     scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", choices=sorted(scenarios), required=True)

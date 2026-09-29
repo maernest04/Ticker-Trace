@@ -6,9 +6,11 @@ from uuid import UUID
 from redis import Redis
 
 from market_execution_lab.pipeline import MAX_DELIVERIES, RECOVERY_IDLE_MS, run_engine
+from market_execution_lab.observability import configure_logging
 
 
 def main() -> None:
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", type=UUID, required=True)
     parser.add_argument("--partition", type=int, required=True)

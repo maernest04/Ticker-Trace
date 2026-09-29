@@ -7,10 +7,12 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from fastapi.testclient import TestClient
 from redis import Redis
 
 from market_execution_lab.engine import simulate
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
+from market_execution_lab.operations_service import create_app
 from market_execution_lab.pipeline import (
     BackpressureError,
     ENGINE_GROUP,
@@ -203,6 +205,31 @@ def test_delivery_limit_dead_letters_an_abandoned_message() -> None:
     dead_letters = redis.xrange(dead_letter_stream_name(str(run_id), partition))
     assert dead_letters[0][1]["reason"] == "delivery limit reached"
     assert redis.xpending(stream, ENGINE_GROUP)["pending"] == 0
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_operational_endpoints_report_readiness_and_pipeline_metrics() -> None:
+    scenario = _new_run(generated_scenarios()[0])
+    redis_url = os.environ["REDIS_URL"]
+    redis = Redis.from_url(redis_url, decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    partition = publish_replay(redis, scenario)
+    run_engine(redis, scenario.order.run_id, partition, "engine-1")
+    run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1")
+    client = TestClient(create_app(redis_url))
+
+    health = client.get("/health", headers={"x-request-id": "request-123"})
+    ready = client.get("/ready")
+    metrics = client.get(f"/metrics?run_id={scenario.order.run_id}&partition={partition}")
+
+    assert health.json() == {"status": "ok"}
+    assert health.headers["x-request-id"] == "request-123"
+    assert ready.json() == {"status": "ready"}
+    assert "market_execution_throughput_events_per_second" in metrics.text
+    assert "market_execution_processing_latency_ms" in metrics.text
 
 
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:

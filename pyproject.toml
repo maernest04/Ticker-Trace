@@ -9,14 +9,18 @@ description = "A distributed stock-execution simulation laboratory"
 requires-python = ">=3.13"
 dependencies = [
   "alembic>=1.14,<2",
+  "fastapi>=0.115,<1",
   "pydantic>=2.10,<3",
   "psycopg[binary]>=3.2,<4",
   "redis>=5,<6",
   "SQLAlchemy>=2.0,<3",
+  "uvicorn>=0.34,<1",
+  "websockets>=14,<16",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "httpx>=0.28,<1",
   "pytest>=9,<10",
 ]
 
@@ -25,6 +29,8 @@ market-execution-lab = "market_execution_lab.cli:main"
 market-execution-replay = "market_execution_lab.replay_service:main"
 market-execution-engine = "market_execution_lab.engine_service:main"
 market-execution-persistence = "market_execution_lab.persistence_service:main"
+market-execution-operations = "market_execution_lab.operations_service:main"
+market-execution-ingestion = "market_execution_lab.ingestion_service:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["services/engine/src"]

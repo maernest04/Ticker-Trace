@@ -11,6 +11,7 @@ from redis.exceptions import ResponseError
 from market_execution_lab.engine import ExecutionEngine, ExecutionMetrics, ExecutionResult, simulate
 from market_execution_lab.fixtures import ScenarioFixture
 from market_execution_lab.models import Fill, MarketEvent, OrderCommand, OrderState, OrderStateChange
+from market_execution_lab.observability import log_event, now_seconds, record_metrics
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import (
     cache_market_state,
@@ -66,6 +67,14 @@ def publish_replay(redis: Redis, scenario: ScenarioFixture, max_queue_depth: int
     for event in events:
         redis.xadd(stream, {"message_type": "market.event.v1", "payload": json.dumps(event.model_dump(mode="json"))})
     redis.xadd(stream, {"message_type": "replay.completed.v1", "payload": "{}"})
+    record_metrics(
+        redis,
+        str(scenario.order.run_id),
+        partition,
+        published_at=now_seconds(),
+        published_messages=len(events) + 3,
+    )
+    log_event("replay_published", run_id=str(scenario.order.run_id), partition=partition, event_count=len(events))
     return partition
 
 
@@ -77,6 +86,7 @@ def run_engine(
     recovery_idle_ms: int = RECOVERY_IDLE_MS,
     max_deliveries: int = MAX_DELIVERIES,
 ) -> ExecutionResult:
+    started_at = now_seconds()
     stream = partition_stream_name(str(run_id), partition)
     _ensure_group(redis, stream, ENGINE_GROUP)
     claimed, exhausted = _claim_pending(redis, stream, ENGINE_GROUP, consumer, recovery_idle_ms, max_deliveries)
@@ -130,6 +140,22 @@ def run_engine(
     )
     if delivered:
         redis.xack(stream, ENGINE_GROUP, *(entry_id for entry_id, _ in delivered))
+    completed_at = now_seconds()
+    record_metrics(
+        redis,
+        str(run_id),
+        partition,
+        engine_completed_at=completed_at,
+        engine_processing_ms=(completed_at - started_at) * 1_000,
+        processed_events=result.processed_events,
+    )
+    log_event(
+        "engine_completed",
+        run_id=str(run_id),
+        partition=partition,
+        processed_events=result.processed_events,
+        state=result.state.value,
+    )
     return result
 
 
@@ -142,6 +168,7 @@ def run_persistence(
     recovery_idle_ms: int = RECOVERY_IDLE_MS,
     max_deliveries: int = MAX_DELIVERIES,
 ) -> None:
+    started_at = now_seconds()
     stream = partition_stream_name(str(run_id), partition)
     _ensure_group(redis, stream, PERSISTENCE_GROUP)
     _persist_source_messages(
@@ -167,6 +194,15 @@ def run_persistence(
             order = OrderCommand.model_validate_json(message["order"])
             store.complete_run(order, _result_from_payload(json.loads(message["result"])), datetime.now(UTC))
             redis.xack(results, PERSISTENCE_GROUP, entry_id)
+            completed_at = now_seconds()
+            record_metrics(
+                redis,
+                str(run_id),
+                partition,
+                persistence_completed_at=completed_at,
+                persistence_processing_ms=(completed_at - started_at) * 1_000,
+            )
+            log_event("persistence_completed", run_id=str(run_id), partition=partition)
             return
         except (KeyError, TypeError, ValueError) as error:
             _dead_letter(redis, run_id, partition, results, PERSISTENCE_GROUP, entry_id, message, str(error))
