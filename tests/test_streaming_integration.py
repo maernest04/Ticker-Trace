@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -12,6 +13,7 @@ from redis import Redis
 
 from market_execution_lab.engine import simulate
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
+from market_execution_lab.api_service import create_app as create_api_app
 from market_execution_lab.operations_service import create_app
 from market_execution_lab.pipeline import (
     BackpressureError,
@@ -230,6 +232,36 @@ def test_operational_endpoints_report_readiness_and_pipeline_metrics() -> None:
     assert ready.json() == {"status": "ready"}
     assert "market_execution_throughput_events_per_second" in metrics.text
     assert "market_execution_processing_latency_ms" in metrics.text
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_read_api_returns_replay_state_without_direct_dependency_access() -> None:
+    template = next(scenario for scenario in generated_scenarios() if scenario.name == "price_gap_before_activation")
+    scenario = _new_run(template)
+    redis_url = os.environ["REDIS_URL"]
+    database_url = os.environ["DATABASE_URL"]
+    redis = Redis.from_url(redis_url, decode_responses=True)
+    store = DatabaseStore(sa.create_engine(database_url))
+    partition = publish_replay(redis, scenario)
+    run_engine(redis, scenario.order.run_id, partition, "engine-1")
+    run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1")
+    client = TestClient(create_api_app(database_url, redis_url))
+
+    symbols = client.get("/api/v1/symbols")
+    market = client.get(f"/api/v1/market/{scenario.order.symbol}?run_id={scenario.order.run_id}")
+    order = client.get(f"/api/v1/orders/{scenario.order.order_id}")
+    replay = client.get(f"/api/v1/replays/{scenario.order.run_id}")
+    watchlists = client.get("/api/v1/watchlists")
+
+    assert {item["symbol"] for item in symbols.json()} >= {scenario.order.symbol}
+    assert market.json()["ask_price"] == "181.00"
+    assert order.json()["final_state"] == "filled"
+    assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
+    assert replay.json()["counts"]["events"] == len(scenario.events)
+    assert watchlists.json() == []
 
 
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:

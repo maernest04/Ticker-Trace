@@ -19,6 +19,7 @@ from market_execution_lab.streaming import partition_stream_name
 def create_app(redis_url: str) -> FastAPI:
     redis = Redis.from_url(redis_url, decode_responses=True)
     app = FastAPI()
+    app.state.redis = redis
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):

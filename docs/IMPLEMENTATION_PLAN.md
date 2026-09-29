@@ -102,9 +102,10 @@ Phase 1 is complete.
 
 ### 3A — Read APIs
 
-- [ ] Implement documented REST resources for symbols, market state, orders, and replay sessions.
-- [ ] Implement `GET /health`, `GET /ready`, symbol, market-state, order-result, and replay-status endpoints.
-- [ ] Add response schemas, request IDs, and API integration tests.
+- [x] Implement documented REST resources for symbols, market state, orders, and replay sessions.
+- [x] Implement `GET /health`, `GET /ready`, symbol, market-state, order-result, and replay-status endpoints.
+- [x] Add response schemas, request IDs, and API integration tests.
+- [x] Store user-selected symbols, watchlists, and replay-session settings in PostgreSQL rather than environment variables.
 
 **Verification:** A client can retrieve current and historical replay state without direct Redis or PostgreSQL access.
 
@@ -114,8 +115,9 @@ Phase 1 is complete.
 - [ ] Validate order side, type, quantity, price, symbol, mode, and latency.
 - [ ] Implement order submission and replay-control endpoints.
 - [ ] Publish commands to the owning stream partition rather than mutating engine state directly.
+- [ ] Add watchlist commands that update private-live Alpaca subscriptions without restarting the service.
 
-**Verification:** An API-created order follows the same engine path and produces the same result as a command-line order.
+**Verification:** An API-created order follows the same engine path and produces the same result as a command-line order; changing a watchlist updates the live subscription without editing environment files or restarting a service.
 
 ### 3C — Safety Boundary
 

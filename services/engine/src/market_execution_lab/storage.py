@@ -74,6 +74,31 @@ order_state_transitions = sa.Table(
     sa.Column("triggering_event_id", sa.String(128)),
 )
 
+watchlists = sa.Table(
+    "watchlists",
+    metadata,
+    sa.Column("watchlist_id", sa.Uuid(as_uuid=True), primary_key=True),
+    sa.Column("name", sa.String(128), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+watchlist_symbols = sa.Table(
+    "watchlist_symbols",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("watchlist_id", sa.Uuid(as_uuid=True), sa.ForeignKey("watchlists.watchlist_id"), nullable=False),
+    sa.Column("symbol", sa.String(10), nullable=False),
+    sa.UniqueConstraint("watchlist_id", "symbol", name="uq_watchlist_symbols_watchlist_symbol"),
+)
+
+replay_session_settings = sa.Table(
+    "replay_session_settings",
+    metadata,
+    sa.Column("run_id", sa.Uuid(as_uuid=True), sa.ForeignKey("replay_runs.run_id"), primary_key=True),
+    sa.Column("mode", sa.String(32), nullable=False),
+    sa.Column("symbols", sa.JSON, nullable=False),
+)
+
 
 class DatabaseStore:
     def __init__(self, engine: Engine) -> None:
@@ -190,3 +215,62 @@ class DatabaseStore:
                 )
                 or 0,
             }
+
+    def list_symbols(self) -> list[str]:
+        with self._engine.connect() as connection:
+            return list(connection.scalars(sa.select(market_events.c.symbol).distinct().order_by(market_events.c.symbol)))
+
+    def replay_for_run(self, run_id: UUID) -> dict[str, object] | None:
+        with self._engine.connect() as connection:
+            replay = connection.execute(
+                sa.select(replay_runs).where(replay_runs.c.run_id == run_id)
+            ).mappings().one_or_none()
+            if replay is None:
+                return None
+            settings = connection.execute(
+                sa.select(replay_session_settings).where(replay_session_settings.c.run_id == run_id)
+            ).mappings().one_or_none()
+            return {
+                **dict(replay),
+                "counts": self.counts_for_run(run_id),
+                "settings": dict(settings) if settings is not None else None,
+            }
+
+    def order_for_id(self, order_id: UUID) -> dict[str, object] | None:
+        with self._engine.connect() as connection:
+            order = connection.execute(sa.select(orders).where(orders.c.order_id == order_id)).mappings().one_or_none()
+            if order is None:
+                return None
+            return {
+                **dict(order),
+                "fills": [
+                    dict(fill)
+                    for fill in connection.execute(
+                        sa.select(fills).where(fills.c.order_id == order_id).order_by(fills.c.filled_at)
+                    ).mappings()
+                ],
+                "transitions": [
+                    dict(transition)
+                    for transition in connection.execute(
+                        sa.select(order_state_transitions)
+                        .where(order_state_transitions.c.order_id == order_id)
+                        .order_by(order_state_transitions.c.changed_at)
+                    ).mappings()
+                ],
+            }
+
+    def list_watchlists(self) -> list[dict[str, object]]:
+        with self._engine.connect() as connection:
+            return [
+                {
+                    **dict(watchlist),
+                    "symbols": list(
+                        connection.scalars(
+                            sa.select(watchlist_symbols.c.symbol)
+                            .where(watchlist_symbols.c.watchlist_id == watchlist["watchlist_id"])
+                            .order_by(watchlist_symbols.c.symbol)
+                        )
+                    ),
+                }
+                for watchlist in connection.execute(sa.select(watchlists).order_by(watchlists.c.created_at)).mappings()
+            ]
