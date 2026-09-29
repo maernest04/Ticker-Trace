@@ -56,9 +56,9 @@ class RedisReplayRunner:
                 raise RuntimeError("stream ended before all replay events were read")
             for _, entries in response:
                 for entry_id, payload in entries:
-                    event = _event_from_json(payload["event"])
+                    event = event_from_json(payload["event"])
                     engine.process(event)
-                    self._cache_market_state(market_key, engine, event)
+                    cache_market_state(self._redis, market_key, engine, event)
                     self._store.record_event(event)
                     next_id = entry_id
                     processed_entries += 1
@@ -77,13 +77,15 @@ class RedisReplayRunner:
             raise AssertionError("streamed execution did not match pure execution")
 
         result = replace(streamed_result, metrics=expected_result.metrics)
-        self._cache_order_state(order_key, result)
+        cache_order_state(self._redis, order_key, result)
         self._store.complete_run(order, result, datetime.now(order.submitted_at.tzinfo))
         return result
 
-    def _cache_market_state(self, key: str, engine: ExecutionEngine, event: MarketEvent) -> None:
-        state = engine.market_state
-        mapping = {
+def cache_market_state(redis: Redis, key: str, engine: ExecutionEngine, event: MarketEvent) -> None:
+    state = engine.market_state
+    redis.hset(
+        key,
+        mapping={
             "event_id": event.event_id,
             "event_time": event.event_time.isoformat(),
             "sequence": str(event.sequence),
@@ -92,21 +94,22 @@ class RedisReplayRunner:
             "bid_size": str(state.bid_size) if state.bid_size is not None else "",
             "ask_price": str(state.ask_price) if state.ask_price is not None else "",
             "ask_size": str(state.ask_size) if state.ask_size is not None else "",
-        }
-        self._redis.hset(key, mapping=mapping)
-
-    def _cache_order_state(self, key: str, result: ExecutionResult) -> None:
-        self._redis.hset(
-            key,
-            mapping={
-                "state": result.state.value,
-                "remaining_quantity": str(result.remaining_quantity),
-                "fill_count": str(len(result.fills)),
-            },
-        )
+        },
+    )
 
 
-def _event_from_json(raw_event: str) -> MarketEvent:
+def cache_order_state(redis: Redis, key: str, result: ExecutionResult) -> None:
+    redis.hset(
+        key,
+        mapping={
+            "state": result.state.value,
+            "remaining_quantity": str(result.remaining_quantity),
+            "fill_count": str(len(result.fills)),
+        },
+    )
+
+
+def event_from_json(raw_event: str) -> MarketEvent:
     payload = json.loads(raw_event)
     if payload["event_type"] == "market.quote.v1":
         return QuoteEvent.model_validate(payload)

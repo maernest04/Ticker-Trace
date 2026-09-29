@@ -37,7 +37,7 @@ Each phase must end with a verifiable result. Do not begin the next phase while 
 - [x] Test and benchmark acceptance criteria are defined.
 - [x] Resume metrics are placeholders until reproducibly measured.
 
-The project is ready to enter Phase 1. No implementation work has started.
+Phase 1 is complete.
 
 ## Phase 1: Technical Proof of Concept
 
@@ -62,13 +62,13 @@ The project is ready to enter Phase 1. No implementation work has started.
 
 ### 1C — Local Durable and Streamed Proof
 
-- [ ] Start Redis and PostgreSQL through Docker Compose.
-- [ ] Add PostgreSQL migrations for events, replay runs, orders, fills, and transitions.
-- [ ] Publish normalized events to fixed symbol partitions in Redis Streams.
-- [ ] Implement one deterministic engine worker for a single partition.
-- [ ] Cache the current quote and order state in Redis.
-- [ ] Persist normalized events, orders, and fills in PostgreSQL.
-- [ ] Add a command-line replay entry point and report event count, final state, and latency.
+- [x] Start Redis and PostgreSQL through Docker Compose.
+- [x] Add PostgreSQL migrations for events, replay runs, orders, fills, and transitions.
+- [x] Publish normalized events to fixed symbol partitions in Redis Streams.
+- [x] Implement one deterministic engine worker for a single partition.
+- [x] Cache the current quote and order state in Redis.
+- [x] Persist normalized events, orders, and fills in PostgreSQL.
+- [x] Add a command-line replay entry point and report event count, final state, and latency.
 
 **Verification:** The Redis-driven replay matches the in-memory result exactly on three consecutive runs. Alpaca remains out of scope until the generated-data path passes.
 
@@ -76,9 +76,9 @@ The project is ready to enter Phase 1. No implementation work has started.
 
 ### 2A — Service Separation
 
-- [ ] Separate ingestion, engine, persistence, and replay into independently runnable processes.
-- [ ] Create Redis Streams consumer groups for engine and persistence responsibilities.
-- [ ] Implement idempotency and event-ordering rules.
+- [x] Separate replay publishing, engine, and persistence into independently runnable processes; private ingestion remains scheduled for 2C.
+- [x] Create Redis Streams consumer groups for engine and persistence responsibilities.
+- [x] Implement stable symbol partitioning and durable event idempotency rules.
 
 **Verification:** The same fixture produces correct results when services run as separate processes.
 

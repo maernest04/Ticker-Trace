@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 
 from market_execution_lab.engine import ExecutionResult
@@ -33,6 +34,7 @@ market_events = sa.Table(
     sa.Column("sequence", sa.Integer, nullable=False),
     sa.Column("partition", sa.Integer, nullable=False),
     sa.Column("payload", sa.JSON, nullable=False),
+    sa.UniqueConstraint("run_id", "event_id", name="uq_market_events_run_event"),
 )
 
 orders = sa.Table(
@@ -80,18 +82,18 @@ class DatabaseStore:
     def create_run(self, run_id: UUID, scenario_name: str, started_at: datetime) -> None:
         with self._engine.begin() as connection:
             connection.execute(
-                sa.insert(replay_runs).values(
+                pg_insert(replay_runs).values(
                     run_id=run_id,
                     scenario_name=scenario_name,
                     status="running",
                     started_at=started_at,
-                )
+                ).on_conflict_do_nothing(index_elements=[replay_runs.c.run_id])
             )
 
     def record_order(self, order: OrderCommand) -> None:
         with self._engine.begin() as connection:
             connection.execute(
-                sa.insert(orders).values(
+                pg_insert(orders).values(
                     order_id=order.order_id,
                     run_id=order.run_id,
                     symbol=order.symbol,
@@ -101,13 +103,13 @@ class DatabaseStore:
                     limit_price=order.limit_price,
                     submitted_at=order.submitted_at,
                     latency_ms=order.latency_ms,
-                )
+                ).on_conflict_do_nothing(index_elements=[orders.c.order_id])
             )
 
     def record_event(self, event: MarketEvent) -> None:
         with self._engine.begin() as connection:
             connection.execute(
-                sa.insert(market_events).values(
+                pg_insert(market_events).values(
                     run_id=event.run_id,
                     event_id=event.event_id,
                     event_type=event.event_type,
@@ -117,26 +119,30 @@ class DatabaseStore:
                     sequence=event.sequence,
                     partition=event.partition,
                     payload=event.model_dump(mode="json"),
-                )
+                ).on_conflict_do_nothing(constraint="uq_market_events_run_event")
             )
 
     def complete_run(self, order: OrderCommand, result: ExecutionResult, completed_at: datetime) -> None:
         with self._engine.begin() as connection:
             if result.fills:
                 connection.execute(
-                    sa.insert(fills),
-                    [
-                        {
-                            "fill_id": fill.fill_id,
-                            "order_id": fill.order_id,
-                            "triggering_event_id": fill.triggering_event_id,
-                            "quantity": fill.quantity,
-                            "price": fill.price,
-                            "filled_at": fill.filled_at,
-                        }
-                        for fill in result.fills
-                    ],
+                    pg_insert(fills).values(
+                        [
+                            {
+                                "fill_id": fill.fill_id,
+                                "order_id": fill.order_id,
+                                "triggering_event_id": fill.triggering_event_id,
+                                "quantity": fill.quantity,
+                                "price": fill.price,
+                                "filled_at": fill.filled_at,
+                            }
+                            for fill in result.fills
+                        ]
+                    ).on_conflict_do_nothing(index_elements=[fills.c.fill_id])
                 )
+            connection.execute(
+                sa.delete(order_state_transitions).where(order_state_transitions.c.order_id == order.order_id)
+            )
             connection.execute(
                 sa.insert(order_state_transitions),
                 [
