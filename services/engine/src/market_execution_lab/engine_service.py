@@ -5,7 +5,7 @@ from uuid import UUID
 
 from redis import Redis
 
-from market_execution_lab.pipeline import run_engine
+from market_execution_lab.pipeline import MAX_DELIVERIES, RECOVERY_IDLE_MS, run_engine
 
 
 def main() -> None:
@@ -14,6 +14,8 @@ def main() -> None:
     parser.add_argument("--partition", type=int, required=True)
     parser.add_argument("--consumer", default="engine-1")
     parser.add_argument("--redis-url", default=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    parser.add_argument("--recovery-idle-ms", type=int, default=RECOVERY_IDLE_MS)
+    parser.add_argument("--max-deliveries", type=int, default=MAX_DELIVERIES)
     arguments = parser.parse_args()
 
     result = run_engine(
@@ -21,6 +23,8 @@ def main() -> None:
         arguments.run_id,
         arguments.partition,
         arguments.consumer,
+        arguments.recovery_idle_ms,
+        arguments.max_deliveries,
     )
     print(json.dumps({"state": result.state.value, "fills": len(result.fills)}))
 

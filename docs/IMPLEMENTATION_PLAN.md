@@ -84,9 +84,9 @@ Phase 1 is complete.
 
 ### 2B — Recovery and Backpressure
 
-- [ ] Reclaim pending events after worker failure.
-- [ ] Route malformed or permanently failing events to a dead-letter stream.
-- [ ] Implement bounded retries and backpressure thresholds.
+- [x] Reclaim pending events after worker failure.
+- [x] Route malformed or permanently failing events to a dead-letter stream.
+- [x] Implement bounded retries and backpressure thresholds.
 
 **Verification:** A killed worker recovers pending events; malformed events are observable and do not halt the pipeline.
 

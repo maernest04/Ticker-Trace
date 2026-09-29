@@ -11,7 +11,17 @@ from redis import Redis
 
 from market_execution_lab.engine import simulate
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
-from market_execution_lab.pipeline import ENGINE_GROUP, PERSISTENCE_GROUP, partition_for_symbol, result_stream_name
+from market_execution_lab.pipeline import (
+    BackpressureError,
+    ENGINE_GROUP,
+    PERSISTENCE_GROUP,
+    dead_letter_stream_name,
+    partition_for_symbol,
+    publish_replay,
+    result_stream_name,
+    run_engine,
+    run_persistence,
+)
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import RedisReplayRunner, market_state_key, order_state_key, partition_stream_name
 
@@ -112,6 +122,87 @@ def test_replay_engine_and_persistence_run_as_separate_processes() -> None:
     assert {group["name"] for group in redis.xinfo_groups(result_stream_name(str(run_id), partition))} == {
         PERSISTENCE_GROUP
     }
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_replacement_engine_recovers_pending_messages_after_a_worker_dies() -> None:
+    template = next(scenario for scenario in generated_scenarios() if scenario.name == "price_gap_before_activation")
+    scenario = _new_run(template)
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    partition = publish_replay(redis, scenario)
+    stream = partition_stream_name(str(scenario.order.run_id), partition)
+    redis.xgroup_create(stream, ENGINE_GROUP, id="0-0")
+    assert redis.xreadgroup(ENGINE_GROUP, "crashed-engine", {stream: ">"}, count=2)
+
+    actual = run_engine(redis, scenario.order.run_id, partition, "replacement-engine", recovery_idle_ms=0)
+    run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1", recovery_idle_ms=0)
+
+    assert actual == simulate(scenario.order, scenario.events)
+    assert redis.xpending(stream, ENGINE_GROUP)["pending"] == 0
+    assert store.counts_for_run(scenario.order.run_id)["fills"] == len(actual.fills)
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_malformed_message_is_dead_lettered_without_stopping_the_replay() -> None:
+    template = next(scenario for scenario in generated_scenarios() if scenario.name == "complete_market_fill")
+    scenario = _new_run(template)
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    partition = publish_replay(redis, scenario)
+    stream = partition_stream_name(str(scenario.order.run_id), partition)
+    redis.xadd(stream, {"message_type": "market.event.v1", "payload": "not-json"})
+
+    actual = run_engine(redis, scenario.order.run_id, partition, "engine-1")
+    run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1")
+
+    dead_letters = redis.xrange(dead_letter_stream_name(str(scenario.order.run_id), partition))
+    assert actual == simulate(scenario.order, scenario.events)
+    assert {entry["group"] for _, entry in dead_letters} == {ENGINE_GROUP, PERSISTENCE_GROUP}
+    assert store.counts_for_run(scenario.order.run_id)["events"] == len(scenario.events)
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_queue_limit_rejects_a_replay_before_publishing() -> None:
+    scenario = _new_run(generated_scenarios()[0])
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    partition = partition_for_symbol(scenario.order.symbol)
+    stream = partition_stream_name(str(scenario.order.run_id), partition)
+
+    with pytest.raises(BackpressureError):
+        publish_replay(redis, scenario, max_queue_depth=1)
+
+    assert redis.xlen(stream) == 0
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_delivery_limit_dead_letters_an_abandoned_message() -> None:
+    run_id = uuid4()
+    partition = 0
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    stream = partition_stream_name(str(run_id), partition)
+    redis.xadd(stream, {"message_type": "invalid.v1", "payload": "{}"})
+    redis.xgroup_create(stream, ENGINE_GROUP, id="0-0")
+    assert redis.xreadgroup(ENGINE_GROUP, "crashed-engine", {stream: ">"})
+
+    with pytest.raises(RuntimeError):
+        run_engine(redis, run_id, partition, "replacement-engine", recovery_idle_ms=0, max_deliveries=1)
+
+    dead_letters = redis.xrange(dead_letter_stream_name(str(run_id), partition))
+    assert dead_letters[0][1]["reason"] == "delivery limit reached"
+    assert redis.xpending(stream, ENGINE_GROUP)["pending"] == 0
 
 
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:
