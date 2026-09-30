@@ -257,6 +257,7 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     market = client.get(f"/api/v1/market/{scenario.order.symbol}?run_id={scenario.order.run_id}")
     order = client.get(f"/api/v1/orders/{scenario.order.order_id}")
     replay = client.get(f"/api/v1/replays/{scenario.order.run_id}")
+    events = client.get(f"/api/v1/replays/{scenario.order.run_id}/events")
     watchlists = client.get("/api/v1/watchlists")
 
     assert {item["symbol"] for item in symbols.json()} >= {scenario.order.symbol}
@@ -266,8 +267,10 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     assert next(item for item in scenarios.json() if item["name"] == "price_gap_before_activation")["replay_change_percent"] == "0.56"
     assert market.json()["ask_price"] == "181.00"
     assert order.json()["final_state"] == "filled"
+    assert Decimal(order.json()["metrics"]["fill_rate"]) == Decimal("1")
     assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
     assert replay.json()["counts"]["events"] == len(scenario.events)
+    assert [event["event_id"] for event in events.json()] == [event.event_id for event in scenario.events]
     assert watchlists.status_code == 200
 
 
@@ -322,6 +325,7 @@ def test_command_api_queues_orders_and_watchlists_without_direct_engine_access()
     assert snapshot["type"] == "session.snapshot"
     assert snapshot["market"]["AMZN"]["ask_price"] == "181.00"
     assert snapshot["orders"][0]["fills"][0]["triggering_event_id"] == "price-gap-quote-2"
+    assert snapshot["events"][-1]["event_id"] == "price-gap-quote-2"
 
     created_watchlist = client.post("/api/v1/watchlists", json={"name": "Tech", "symbols": ["AAPL", "MSFT"]})
     updated_watchlist = client.put(

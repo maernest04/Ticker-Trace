@@ -57,6 +57,6 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 
 ## Run the Execution Workspace
 
-Start Redis and PostgreSQL, apply migrations, and run the API in public replay mode. From `frontend`, copy `.env.example` to `.env.local`, then run `npm install` and `npm run dev`. The interface is available at `http://localhost:3000` and proxies browser API calls to `http://localhost:8000` by default.
+Start Redis and PostgreSQL, apply migrations, run the API in public replay mode, then start `market-execution-engine --forever` and `market-execution-persistence --forever` as separate worker processes. From `frontend`, copy `.env.example` to `.env.local`, then run `npm install` and `npm run dev`. The interface is available at `http://localhost:3000` and proxies browser API calls to `http://localhost:8000` by default.
 
-The workspace queues a simulated order. The order-result timeline and live worker updates are Phase 4B.
+The workspace streams the simulated order's replay trace, lifecycle, fills, and execution metrics after the worker processes finish it.

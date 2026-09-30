@@ -141,12 +141,12 @@ Phase 1 is complete.
 
 ### 4B — Live Result Explanation
 
-- [ ] Add a bounded replay-event read endpoint and include recent events in session-scoped WebSocket updates.
-- [ ] Add a compact price trace and event tape to the central market panel without rendering every event received by the backend.
-- [ ] Add live WebSocket updates to the watchlist, quote state, and bottom execution panel.
-- [ ] Add clear loading, disconnected, empty, and error states.
-- [ ] Display quote freshness, order activation, triggering events, fills, and computed execution metrics.
-- [ ] Display execution-model limitations next to results.
+- [x] Add a bounded replay-event read endpoint and include recent events in session-scoped WebSocket updates.
+- [x] Add a compact price trace and event tape to the central market panel without rendering every event received by the backend.
+- [x] Add live WebSocket updates to the watchlist, quote state, and bottom execution panel.
+- [x] Add clear loading, disconnected, empty, and error states.
+- [x] Display quote freshness, order activation, triggering events, fills, and computed execution metrics.
+- [x] Display execution-model limitations next to results.
 
 **Verification:** A user can follow an order from submission to final state in the bottom execution panel and identify the market event that caused every fill.
 

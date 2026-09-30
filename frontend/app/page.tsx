@@ -32,6 +32,44 @@ type QueueResult = {
   status: string;
 };
 
+type MarketEvent = {
+  event_id: string;
+  event_type: string;
+  symbol: string;
+  event_time: string;
+  sequence: number;
+  bid_price: string | null;
+  bid_size: number | null;
+  ask_price: string | null;
+  ask_size: number | null;
+  price: string | null;
+  size: number | null;
+};
+
+type ExecutionMetrics = {
+  average_fill_price: string | null;
+  fill_rate: string;
+  spread_cost: string | null;
+  time_to_first_fill_ms: number | null;
+  time_to_completion_ms: number | null;
+  latency_impact: string | null;
+};
+
+type SessionOrder = {
+  order_id: string;
+  final_state: string | null;
+  remaining_quantity: number | null;
+  metrics: ExecutionMetrics | null;
+  fills: { fill_id: string; triggering_event_id: string; quantity: number; price: string; filled_at: string }[];
+  transitions: { state: string; changed_at: string; triggering_event_id: string | null }[];
+};
+
+type SessionSnapshot = {
+  events: MarketEvent[];
+  market: Record<string, Scenario["market"]>;
+  orders: SessionOrder[];
+};
+
 const scenarioTitle = (name: string) => name.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
 const formatPrice = (price: string | null) => price ? `$${Number(price).toFixed(2)}` : "—";
@@ -49,11 +87,15 @@ export default function ExecutionLab() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [queued, setQueued] = useState<QueueResult>();
+  const [session, setSession] = useState<SessionSnapshot>();
+  const [connectionState, setConnectionState] = useState("Replay ready");
 
   const scenario = useMemo(() => scenarios.find((item) => item.name === scenarioName), [scenarioName, scenarios]);
-  const spread = scenario?.market.bid_price && scenario.market.ask_price
-    ? (Number(scenario.market.ask_price) - Number(scenario.market.bid_price)).toFixed(2)
+  const market = scenario && session?.market[scenario.symbol] ? session.market[scenario.symbol] : scenario?.market;
+  const spread = market?.bid_price && market.ask_price
+    ? (Number(market.ask_price) - Number(market.bid_price)).toFixed(2)
     : null;
+  const activeOrder = session?.orders[0];
 
   useEffect(() => {
     Promise.all([fetch("/backend/configuration"), fetch("/backend/scenarios")])
@@ -81,8 +123,45 @@ export default function ExecutionLab() {
     setLimitPrice(scenario.default_limit_price ?? "");
     setLatency(String(scenario.default_latency_ms));
     setQueued(undefined);
+    setSession(undefined);
     setError("");
   }, [scenario]);
+
+  useEffect(() => {
+    if (!queued) {
+      return;
+    }
+    let socket: WebSocket | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
+    const origin = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:8000";
+    const socketUrl = `${origin.replace(/^http/, "ws")}/ws/v1/sessions/${queued.run_id}`;
+    const connect = () => {
+      setConnectionState("Connecting to workers");
+      socket = new WebSocket(socketUrl);
+      socket.onopen = () => setConnectionState("Streaming updates");
+      socket.onmessage = (message) => {
+        const snapshot = JSON.parse(message.data) as SessionSnapshot;
+        setSession(snapshot);
+        setConnectionState(snapshot.orders[0]?.final_state ? "Replay complete" : "Streaming updates");
+      };
+      socket.onerror = () => socket?.close();
+      socket.onclose = () => {
+        if (!closed) {
+          setConnectionState("Waiting for workers");
+          retry = setTimeout(connect, 500);
+        }
+      };
+    };
+    connect();
+    return () => {
+      closed = true;
+      socket?.close();
+      if (retry) {
+        clearTimeout(retry);
+      }
+    };
+  }, [queued]);
 
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -124,7 +203,7 @@ export default function ExecutionLab() {
         <div className="brand"><span className="brand-mark"><span>M</span></span><strong>Market Execution Lab</strong><span className="subtle">Execution terminal</span></div>
         <nav className="terminal-nav" aria-label="Terminal sections"><span className="active">Execution</span><span>Replay</span><span>Pipeline</span></nav>
         <div className="terminal-controls">
-          <span className="connection"><i /> Replay ready</span>
+          <span className="connection"><i /> {connectionState}</span>
           <span className="mode">{mode === "private_live" ? "Private live" : "Public replay"}</span>
           <label className="dataset" htmlFor="scenario">Dataset<select id="scenario" value={scenarioName} onChange={(event) => setScenarioName(event.target.value)} disabled={loading}>{scenarios.map((item) => <option key={item.name} value={item.name}>{item.symbol} · {scenarioTitle(item.name)}</option>)}</select></label>
         </div>
@@ -139,7 +218,10 @@ export default function ExecutionLab() {
             <div className="panel-heading"><div><span className="eyebrow">Watchlist</span><h2>Replay universe</h2></div><span className="count">{scenarios.length}</span></div>
             <div className="watchlist-columns"><span>Symbol</span><span>Last</span><span>Replay Δ</span></div>
             <div className="watchlist-items">
-              {scenarios.map((item) => <button className={`watchlist-row ${item.name === scenario.name ? "selected" : ""}`} key={item.name} onClick={() => setScenarioName(item.name)} type="button"><strong>{item.symbol}</strong><span>{formatPrice(item.market.last_trade_price ?? item.market.ask_price ?? item.market.bid_price)}</span><Change value={item.replay_change_percent} /></button>)}
+              {scenarios.map((item) => {
+                const latestMarket = item.symbol === scenario.symbol && session?.market[item.symbol] ? session.market[item.symbol] : item.market;
+                return <button className={`watchlist-row ${item.name === scenario.name ? "selected" : ""}`} key={item.name} onClick={() => setScenarioName(item.name)} type="button"><strong>{item.symbol}</strong><span>{formatPrice(latestMarket.last_trade_price ?? latestMarket.ask_price ?? latestMarket.bid_price)}</span><Change value={item.replay_change_percent} /></button>;
+              })}
             </div>
             <p className="panel-note">Replay Δ compares the first and final fixture event, not live day performance.</p>
             <div className="session-summary"><div><span>Mode</span><strong>{mode === "private_live" ? "Private live" : "Public replay"}</strong></div><div><span>Fixtures</span><strong>{scenarios.length} available</strong></div><div><span>Model</span><strong>Top of book</strong></div></div>
@@ -148,12 +230,12 @@ export default function ExecutionLab() {
           <section className="market-workspace panel">
             <div className="market-heading">
               <div><span className="eyebrow">Selected instrument</span><div className="symbol-title"><h1>{scenario.symbol}</h1><Change value={scenario.replay_change_percent} /></div></div>
-              <div className="timestamp"><span>Replay timestamp</span><strong>{new Date(scenario.market.event_time).toLocaleTimeString()}</strong></div>
+              <div className="timestamp"><span>{session ? "Last event" : "Replay timestamp"}</span><strong>{market ? new Date(market.event_time).toLocaleTimeString() : "—"}</strong></div>
             </div>
-            <div className="quote-strip"><Quote label="Bid" price={scenario.market.bid_price} size={scenario.market.bid_size} tone="bid" /><Quote label="Ask" price={scenario.market.ask_price} size={scenario.market.ask_size} tone="ask" /><Quote label="Spread" price={spread} /><Quote label="Last trade" price={scenario.market.last_trade_price} /></div>
+            <div className="quote-strip"><Quote label="Bid" price={market?.bid_price ?? null} size={market?.bid_size} tone="bid" /><Quote label="Ask" price={market?.ask_price ?? null} size={market?.ask_size} tone="ask" /><Quote label="Spread" price={spread} /><Quote label="Last trade" price={market?.last_trade_price ?? null} /></div>
             <div className="market-body">
-              <div className="depth-panel"><div className="section-label"><span>Top of book</span><span>Visible liquidity</span></div><div className="book-row ask"><span>Ask</span><strong>{formatPrice(scenario.market.ask_price)}</strong><span>{scenario.market.ask_size ?? "—"} sh</span></div><div className="book-row mid"><span>Mid</span><strong>{scenario.market.bid_price && scenario.market.ask_price ? formatPrice(((Number(scenario.market.bid_price) + Number(scenario.market.ask_price)) / 2).toFixed(2)) : "—"}</strong><span>{spread ? `$${spread} spread` : "—"}</span></div><div className="book-row bid"><span>Bid</span><strong>{formatPrice(scenario.market.bid_price)}</strong><span>{scenario.market.bid_size ?? "—"} sh</span></div></div>
-              <div className="tape-panel"><div className="section-label"><span>Replay price trace</span><span>4B event stream</span></div><div className="tape-empty"><strong>Replay state loaded</strong><p>Phase 4B adds the bounded event tape and price trace that explain each fill.</p></div><div className="trace-scale"><span>Bid / ask</span><span>Event time →</span></div></div>
+              <div className="depth-panel"><div className="section-label"><span>Top of book</span><span>Visible liquidity</span></div><div className="book-row ask"><span>Ask</span><strong>{formatPrice(market?.ask_price ?? null)}</strong><span>{market?.ask_size ?? "—"} sh</span></div><div className="book-row mid"><span>Mid</span><strong>{market?.bid_price && market.ask_price ? formatPrice(((Number(market.bid_price) + Number(market.ask_price)) / 2).toFixed(2)) : "—"}</strong><span>{spread ? `$${spread} spread` : "—"}</span></div><div className="book-row bid"><span>Bid</span><strong>{formatPrice(market?.bid_price ?? null)}</strong><span>{market?.bid_size ?? "—"} sh</span></div></div>
+              <div className="tape-panel"><div className="section-label"><span>Replay price trace</span><span>{session ? `${session.events.length} events` : "Waiting for run"}</span></div>{session?.events.length ? <PriceTrace events={session.events} /> : <div className="tape-empty"><strong>Waiting for worker output</strong><p>The trace opens when the engine and persistence workers process this replay.</p></div>}<div className="trace-scale"><span>Bid / ask</span><span>Event time →</span></div></div>
             </div>
             <p className="model-note">Top-of-book simulation only. Results do not represent a brokerage order, full depth, or exchange execution.</p>
           </section>
@@ -168,10 +250,10 @@ export default function ExecutionLab() {
         </section>
 
         <section className="execution-panel panel" aria-live="polite">
-          <div className="panel-heading"><div><span className="eyebrow">Execution lifecycle</span><h2>{queued ? "Simulation queued" : "No active simulation"}</h2></div><span className={queued ? "status queued-status" : "status"}>{queued ? "Queued" : "Standing by"}</span></div>
-          {queued ? <div className="queue-details"><span>Run ID <code>{queued.run_id}</code></span><span>Order ID <code>{queued.order_id}</code></span><span>Partition {queued.partition}</span><span>Next: workers process the replay in Phase 4B.</span></div> : <div className="empty-lifecycle"><span>01</span><p>Configure a market or limit order in the ticket. Its queue, activation, fills, and explanation will appear here.</p></div>}
+          <div className="panel-heading"><div><span className="eyebrow">Execution lifecycle</span><h2>{activeOrder?.final_state ? `Order ${activeOrder.final_state}` : queued ? "Simulation queued" : "No active simulation"}</h2></div><span className={activeOrder?.final_state || queued ? "status queued-status" : "status"}>{activeOrder?.final_state ?? (queued ? "Queued" : "Standing by")}</span></div>
+          {activeOrder ? <ExecutionDetails order={activeOrder} events={session?.events ?? []} /> : queued ? <div className="queue-details"><span>Run ID <code>{queued.run_id}</code></span><span>Order ID <code>{queued.order_id}</code></span><span>Partition {queued.partition}</span><span>{connectionState}</span></div> : <div className="empty-lifecycle"><span>01</span><p>Configure a market or limit order in the ticket. Its queue, activation, fills, and explanation will appear here.</p></div>}
         </section>
-        <footer className="status-ticker"><span><i /> {mode === "private_live" ? "Private live mode" : "Generated replay fixtures"}</span><span>Symbols {scenarios.length}</span><span>Execution model: top of book</span><span>Redis Streams → workers → PostgreSQL</span><span>Event trace arrives in 4B</span></footer>
+        <footer className="status-ticker"><span><i /> {mode === "private_live" ? "Private live mode" : "Generated replay fixtures"}</span><span>Symbols {scenarios.length}</span><span>Execution model: top of book</span><span>Redis Streams → workers → PostgreSQL</span><span>{connectionState}</span></footer>
       </> : null}
     </main>
   );
@@ -192,4 +274,30 @@ function Change({ value }: { value: string | null }) {
   const amount = Number(value);
   const direction = amount > 0 ? "up" : amount < 0 ? "down" : "flat";
   return <span className={`change ${direction}`}>{amount > 0 ? "+" : ""}{amount.toFixed(2)}%</span>;
+}
+
+function PriceTrace({ events }: { events: MarketEvent[] }) {
+  const pricedEvents = events.map((event) => ({ event, price: event.price ?? event.ask_price ?? event.bid_price })).filter((item): item is { event: MarketEvent; price: string } => item.price !== null);
+  const prices = pricedEvents.map((item) => Number(item.price));
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const points = pricedEvents.map(({ price }, index) => {
+    const x = pricedEvents.length === 1 ? 50 : (index / (pricedEvents.length - 1)) * 100;
+    const y = high === low ? 50 : 88 - ((Number(price) - low) / (high - low)) * 76;
+    return `${x},${y}`;
+  }).join(" ");
+
+  return <div className="trace-content"><svg aria-label="Replay price trace" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline fill="none" points={points} stroke="#00d971" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />{pricedEvents.map(({ event, price }, index) => { const [x, y] = points.split(" ")[index].split(","); return <circle cx={x} cy={y} fill={event.event_type === "trade" ? "#f5ca4a" : "#00d971"} key={event.event_id} r="1.6" vectorEffect="non-scaling-stroke" />; })}</svg><div className="event-tape">{events.slice(-4).reverse().map((event) => <div key={event.event_id}><span>{event.event_type}</span><strong>{formatPrice(event.price ?? event.ask_price ?? event.bid_price)}</strong><small>{new Date(event.event_time).toLocaleTimeString()}</small></div>)}</div></div>;
+}
+
+function ExecutionDetails({ order, events }: { order: SessionOrder; events: MarketEvent[] }) {
+  return <div className="execution-details">
+    {order.metrics ? <div className="execution-metrics"><Metric label="Fill rate" value={`${(Number(order.metrics.fill_rate) * 100).toFixed(0)}%`} /><Metric label="Average fill" value={formatPrice(order.metrics.average_fill_price)} /><Metric label="Spread cost" value={formatPrice(order.metrics.spread_cost)} /><Metric label="Latency impact" value={formatPrice(order.metrics.latency_impact)} /><Metric label="Time to fill" value={order.metrics.time_to_completion_ms === null ? "—" : `${order.metrics.time_to_completion_ms} ms`} /></div> : null}
+    <div className="transition-list">{order.transitions.map((transition) => { const event = events.find((item) => item.event_id === transition.triggering_event_id); return <div key={`${transition.state}-${transition.changed_at}`}><span className="transition-state">{transition.state}</span><span>{event ? `${event.event_type} ${event.event_id}` : "order submitted"}</span><time>{new Date(transition.changed_at).toLocaleTimeString()}</time></div>; })}</div>
+    {order.fills.map((fill) => <p className="fill-note" key={fill.fill_id}>Filled {fill.quantity} shares at {formatPrice(fill.price)} from event <code>{fill.triggering_event_id}</code>.</p>)}
+  </div>;
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div><span>{label}</span><strong>{value}</strong></div>;
 }

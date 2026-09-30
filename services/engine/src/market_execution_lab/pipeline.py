@@ -29,6 +29,10 @@ PERSISTENCE_GROUP = "persistence"
 RECOVERY_IDLE_MS = 1_000
 MAX_DELIVERIES = 3
 MAX_QUEUE_DEPTH = 10_000
+ENGINE_JOB_STREAM = "execution.engine.jobs"
+PERSISTENCE_JOB_STREAM = "execution.persistence.jobs"
+ENGINE_JOB_GROUP = "engine-workers"
+PERSISTENCE_JOB_GROUP = "persistence-workers"
 
 
 class BackpressureError(RuntimeError):
@@ -86,8 +90,32 @@ def publish_replay(
         published_at=now_seconds(),
         published_messages=len(events) + 3,
     )
+    redis.xadd(ENGINE_JOB_STREAM, {"run_id": str(scenario.order.run_id), "partition": partition})
     log_event("replay_published", run_id=str(scenario.order.run_id), partition=partition, event_count=len(events))
     return partition
+
+
+def run_engine_worker(redis: Redis, consumer: str) -> None:
+    _ensure_group(redis, ENGINE_JOB_STREAM, ENGINE_JOB_GROUP)
+    while True:
+        response = redis.xreadgroup(ENGINE_JOB_GROUP, consumer, {ENGINE_JOB_STREAM: ">"}, count=1, block=1_000)
+        for _, entries in response:
+            for entry_id, message in entries:
+                run_id = UUID(message["run_id"])
+                partition = int(message["partition"])
+                run_engine(redis, run_id, partition, consumer)
+                redis.xadd(PERSISTENCE_JOB_STREAM, {"run_id": str(run_id), "partition": partition})
+                redis.xack(ENGINE_JOB_STREAM, ENGINE_JOB_GROUP, entry_id)
+
+
+def run_persistence_worker(redis: Redis, store: DatabaseStore, consumer: str) -> None:
+    _ensure_group(redis, PERSISTENCE_JOB_STREAM, PERSISTENCE_JOB_GROUP)
+    while True:
+        response = redis.xreadgroup(PERSISTENCE_JOB_GROUP, consumer, {PERSISTENCE_JOB_STREAM: ">"}, count=1, block=1_000)
+        for _, entries in response:
+            for entry_id, message in entries:
+                run_persistence(redis, store, UUID(message["run_id"]), int(message["partition"]), consumer)
+                redis.xack(PERSISTENCE_JOB_STREAM, PERSISTENCE_JOB_GROUP, entry_id)
 
 
 def run_engine(

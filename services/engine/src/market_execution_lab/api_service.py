@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -79,6 +79,15 @@ class TransitionResponse(BaseModel):
     triggering_event_id: str | None
 
 
+class ExecutionMetricsResponse(BaseModel):
+    average_fill_price: Decimal | None
+    fill_rate: Decimal
+    spread_cost: Decimal | None
+    time_to_first_fill_ms: int | None
+    time_to_completion_ms: int | None
+    latency_impact: Decimal | None
+
+
 class OrderResponse(BaseModel):
     order_id: UUID
     run_id: UUID
@@ -91,6 +100,7 @@ class OrderResponse(BaseModel):
     latency_ms: int
     final_state: str | None
     remaining_quantity: int | None
+    metrics: ExecutionMetricsResponse | None
     fills: list[FillResponse]
     transitions: list[TransitionResponse]
 
@@ -115,6 +125,20 @@ class ReplayResponse(BaseModel):
     completed_at: datetime | None
     counts: ReplayCountsResponse
     settings: ReplaySettingsResponse | None
+
+
+class MarketEventResponse(BaseModel):
+    event_id: str
+    event_type: str
+    symbol: str
+    event_time: datetime
+    sequence: int
+    bid_price: Decimal | None
+    bid_size: int | None
+    ask_price: Decimal | None
+    ask_size: int | None
+    price: Decimal | None
+    size: int | None
 
 
 class WatchlistResponse(BaseModel):
@@ -240,6 +264,11 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     def replay(run_id: UUID) -> ReplayResponse:
         return _replay_response(store, run_id)
 
+    @app.get("/api/v1/replays/{run_id}/events", response_model=list[MarketEventResponse])
+    def replay_events(run_id: UUID, limit: int = 200) -> list[MarketEventResponse]:
+        _replay_response(store, run_id)
+        return [_event_response(event) for event in store.events_for_run(run_id, min(limit, 500))]
+
     @app.get("/api/v1/watchlists", response_model=list[WatchlistResponse])
     def watchlists() -> list[WatchlistResponse]:
         return [WatchlistResponse.model_validate(watchlist) for watchlist in store.list_watchlists()]
@@ -311,6 +340,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
         while True:
             latest_replay = ReplayResponse.model_validate(store.replay_for_run(run_id))
             latest_orders = [OrderResponse.model_validate(order) for order in store.orders_for_run(run_id)]
+            events = [_event_response(event) for event in store.events_for_run(run_id, 200)]
             market = {
                 symbol: redis.hgetall(market_state_key(str(run_id), symbol))
                 for symbol in (latest_replay.settings.symbols if latest_replay.settings else [])
@@ -319,13 +349,19 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
                 "type": "session.snapshot",
                 "replay": latest_replay.model_dump(mode="json"),
                 "orders": [order.model_dump(mode="json") for order in latest_orders],
+                "events": [event.model_dump(mode="json") for event in events],
                 "market": market,
                 "health": {"status": "ready"},
             }
             if payload != last_payload:
                 await websocket.send_json(payload)
                 last_payload = payload
-            await asyncio.sleep(0.25)
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.25)
+            except TimeoutError:
+                pass
+            except WebSocketDisconnect:
+                return
 
     return app
 
@@ -407,6 +443,23 @@ def _new_run(scenario: ScenarioFixture, order: OrderCommand) -> ScenarioFixture:
         scenario,
         order=order,
         events=tuple(event.model_copy(update={"run_id": order.run_id}) for event in scenario.events),
+    )
+
+
+def _event_response(event: dict[str, object]) -> MarketEventResponse:
+    payload = event["payload"]
+    return MarketEventResponse(
+        event_id=event["event_id"],
+        event_type=event["event_type"],
+        symbol=event["symbol"],
+        event_time=event["event_time"],
+        sequence=event["sequence"],
+        bid_price=payload.get("bid_price"),
+        bid_size=payload.get("bid_size"),
+        ask_price=payload.get("ask_price"),
+        ask_size=payload.get("ask_size"),
+        price=payload.get("price"),
+        size=payload.get("size"),
     )
 
 

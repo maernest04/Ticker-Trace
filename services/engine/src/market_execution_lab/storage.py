@@ -51,6 +51,12 @@ orders = sa.Table(
     sa.Column("latency_ms", sa.Integer, nullable=False),
     sa.Column("final_state", sa.String(32)),
     sa.Column("remaining_quantity", sa.Integer),
+    sa.Column("average_fill_price", sa.Numeric(18, 6)),
+    sa.Column("fill_rate", sa.Numeric(18, 6)),
+    sa.Column("spread_cost", sa.Numeric(18, 6)),
+    sa.Column("time_to_first_fill_ms", sa.Integer),
+    sa.Column("time_to_completion_ms", sa.Integer),
+    sa.Column("latency_impact", sa.Numeric(18, 6)),
 )
 
 fills = sa.Table(
@@ -194,7 +200,16 @@ class DatabaseStore:
             connection.execute(
                 sa.update(orders)
                 .where(orders.c.order_id == order.order_id)
-                .values(final_state=result.state.value, remaining_quantity=result.remaining_quantity)
+                .values(
+                    final_state=result.state.value,
+                    remaining_quantity=result.remaining_quantity,
+                    average_fill_price=result.metrics.average_fill_price,
+                    fill_rate=result.metrics.fill_rate,
+                    spread_cost=result.metrics.spread_cost,
+                    time_to_first_fill_ms=_milliseconds(result.metrics.time_to_first_fill),
+                    time_to_completion_ms=_milliseconds(result.metrics.time_to_completion),
+                    latency_impact=result.metrics.latency_impact,
+                )
             )
             connection.execute(
                 sa.update(replay_runs)
@@ -254,6 +269,7 @@ class DatabaseStore:
                 return None
             return {
                 **dict(order),
+                "metrics": _order_metrics(order),
                 "fills": [
                     dict(fill)
                     for fill in connection.execute(
@@ -274,6 +290,18 @@ class DatabaseStore:
         with self._engine.connect() as connection:
             order_ids = list(connection.scalars(sa.select(orders.c.order_id).where(orders.c.run_id == run_id)))
         return [order for order_id in order_ids if (order := self.order_for_id(order_id)) is not None]
+
+    def events_for_run(self, run_id: UUID, limit: int) -> list[dict[str, object]]:
+        with self._engine.connect() as connection:
+            rows = list(
+                connection.execute(
+                    sa.select(market_events)
+                    .where(market_events.c.run_id == run_id)
+                    .order_by(market_events.c.event_time.desc(), market_events.c.sequence.desc())
+                    .limit(limit)
+                ).mappings()
+            )
+        return [dict(row) for row in reversed(rows)]
 
     def list_watchlists(self) -> list[dict[str, object]]:
         with self._engine.connect() as connection:
@@ -332,3 +360,20 @@ class DatabaseStore:
                     )
                 ),
             }
+
+
+def _milliseconds(value) -> int | None:
+    return int(value.total_seconds() * 1_000) if value else None
+
+
+def _order_metrics(order) -> dict[str, object] | None:
+    if order["final_state"] is None:
+        return None
+    return {
+        "average_fill_price": order["average_fill_price"],
+        "fill_rate": order["fill_rate"],
+        "spread_cost": order["spread_cost"],
+        "time_to_first_fill_ms": order["time_to_first_fill_ms"],
+        "time_to_completion_ms": order["time_to_completion_ms"],
+        "latency_impact": order["latency_impact"],
+    }
