@@ -258,6 +258,7 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     order = client.get(f"/api/v1/orders/{scenario.order.order_id}")
     replay = client.get(f"/api/v1/replays/{scenario.order.run_id}")
     events = client.get(f"/api/v1/replays/{scenario.order.run_id}/events")
+    pipeline_health = client.get(f"/api/v1/replays/{scenario.order.run_id}/health?partition={partition}")
     watchlists = client.get("/api/v1/watchlists")
 
     assert {item["symbol"] for item in symbols.json()} >= {scenario.order.symbol}
@@ -271,6 +272,8 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
     assert replay.json()["counts"]["events"] == len(scenario.events)
     assert [event["event_id"] for event in events.json()] == [event.event_id for event in scenario.events]
+    assert pipeline_health.json()["queue_depth"] == 0
+    assert pipeline_health.json()["throughput_events_per_second"] > 0
     assert watchlists.status_code == 200
 
 

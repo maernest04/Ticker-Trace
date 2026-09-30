@@ -152,9 +152,9 @@ Phase 1 is complete.
 
 ### 4C — Replay Comparison and Health
 
-- [ ] Add replay speed controls and parameter comparison in the terminal header and bottom panel.
-- [ ] Add a compact health and connection view after the primary terminal workflow is complete.
-- [ ] Confirm usability at common desktop dimensions before attempting a mobile layout.
+- [x] Add client-side replay speed controls and a zero-latency parameter comparison in the terminal header and bottom panel.
+- [x] Add a compact health and connection view after the primary terminal workflow is complete.
+- [x] Confirm usability at common desktop dimensions before attempting a mobile layout.
 
 **Verification:** A user can complete the MVP workflow without terminal access.
 

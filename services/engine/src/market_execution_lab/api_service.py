@@ -16,11 +16,11 @@ import uvicorn
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
 from market_execution_lab.models import OrderCommand, OrderSide, OrderType, QuoteEvent, TradeEvent
-from market_execution_lab.observability import configure_logging, request_id_context
+from market_execution_lab.observability import configure_logging, pipeline_metrics, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
 from market_execution_lab.pipeline import publish_replay
 from market_execution_lab.storage import DatabaseStore
-from market_execution_lab.streaming import market_state_key
+from market_execution_lab.streaming import market_state_key, partition_stream_name
 
 
 class SymbolResponse(BaseModel):
@@ -139,6 +139,16 @@ class MarketEventResponse(BaseModel):
     ask_size: int | None
     price: Decimal | None
     size: int | None
+
+
+class PipelineHealthResponse(BaseModel):
+    queue_depth: int
+    engine_lag: int
+    engine_pending: int
+    persistence_lag: int
+    persistence_pending: int
+    throughput_events_per_second: float
+    processing_latency_ms: float | None
 
 
 class WatchlistResponse(BaseModel):
@@ -268,6 +278,20 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     def replay_events(run_id: UUID, limit: int = 200) -> list[MarketEventResponse]:
         _replay_response(store, run_id)
         return [_event_response(event) for event in store.events_for_run(run_id, min(limit, 500))]
+
+    @app.get("/api/v1/replays/{run_id}/health", response_model=PipelineHealthResponse)
+    def replay_health(run_id: UUID, partition: int) -> PipelineHealthResponse:
+        _replay_response(store, run_id)
+        result = pipeline_metrics(redis, partition_stream_name(str(run_id), partition), str(run_id), partition)
+        return PipelineHealthResponse(
+            queue_depth=result.queue_depth,
+            engine_lag=result.engine_lag,
+            engine_pending=result.engine_pending,
+            persistence_lag=result.persistence_lag,
+            persistence_pending=result.persistence_pending,
+            throughput_events_per_second=result.throughput_events_per_second,
+            processing_latency_ms=result.processing_latency_ms,
+        )
 
     @app.get("/api/v1/watchlists", response_model=list[WatchlistResponse])
     def watchlists() -> list[WatchlistResponse]:
