@@ -1,15 +1,22 @@
 import os
-from datetime import datetime
+import json
+import asyncio
+from dataclasses import replace
+from datetime import UTC, datetime
 from decimal import Decimal
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, WebSocket
+from pydantic import BaseModel, Field, field_validator, model_validator
 import sqlalchemy as sa
 import uvicorn
 
+from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
+from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
+from market_execution_lab.models import OrderCommand, OrderSide, OrderType
 from market_execution_lab.observability import configure_logging
 from market_execution_lab.operations_service import create_app as create_operations_app
+from market_execution_lab.pipeline import publish_replay
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import market_state_key
 
@@ -90,10 +97,58 @@ class WatchlistResponse(BaseModel):
     symbols: list[str]
 
 
+class ReplayCommandRequest(BaseModel):
+    scenario_name: str
+
+
+class OrderCommandRequest(BaseModel):
+    scenario_name: str
+    symbol: str
+    side: OrderSide
+    order_type: OrderType
+    quantity: int = Field(gt=0)
+    limit_price: Decimal | None = Field(default=None, gt=0)
+    latency_ms: int = Field(default=0, ge=0)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @model_validator(mode="after")
+    def validate_limit_price(self) -> "OrderCommandRequest":
+        if self.order_type is OrderType.LIMIT and self.limit_price is None:
+            raise ValueError("limit orders require limit_price")
+        if self.order_type is OrderType.MARKET and self.limit_price is not None:
+            raise ValueError("market orders cannot include limit_price")
+        return self
+
+
+class QueuedReplayResponse(BaseModel):
+    run_id: UUID
+    order_id: UUID
+    partition: int
+    status: str
+
+
+class WatchlistCommandRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    symbols: list[str] = Field(min_length=1)
+
+    @field_validator("symbols")
+    @classmethod
+    def normalize_symbols(cls, values: list[str]) -> list[str]:
+        symbols = sorted({value.strip().upper() for value in values if value.strip()})
+        if not symbols:
+            raise ValueError("watchlists require at least one symbol")
+        return symbols
+
+
 def create_app(database_url: str, redis_url: str) -> FastAPI:
     app = create_operations_app(redis_url)
     store = DatabaseStore(sa.create_engine(database_url))
     redis = app.state.redis
+    scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
 
     @app.get("/api/v1/symbols", response_model=list[SymbolResponse])
     def symbols() -> list[SymbolResponse]:
@@ -126,14 +181,94 @@ def create_app(database_url: str, redis_url: str) -> FastAPI:
 
     @app.get("/api/v1/replays/{run_id}", response_model=ReplayResponse)
     def replay(run_id: UUID) -> ReplayResponse:
-        result = store.replay_for_run(run_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="replay not found")
-        return ReplayResponse.model_validate(result)
+        return _replay_response(store, run_id)
 
     @app.get("/api/v1/watchlists", response_model=list[WatchlistResponse])
     def watchlists() -> list[WatchlistResponse]:
         return [WatchlistResponse.model_validate(watchlist) for watchlist in store.list_watchlists()]
+
+    @app.post("/api/v1/replays", response_model=QueuedReplayResponse, status_code=202)
+    def create_replay(request: ReplayCommandRequest) -> QueuedReplayResponse:
+        scenario = _scenario_for_name(scenarios, request.scenario_name)
+        order = scenario.order.model_copy(update={"run_id": uuid4(), "order_id": uuid4()})
+        queued = _new_run(scenario, order)
+        partition = publish_replay(redis, queued, mode=os.getenv("APP_MODE", "public_replay"))
+        return QueuedReplayResponse(
+            run_id=queued.order.run_id,
+            order_id=queued.order.order_id,
+            partition=partition,
+            status="queued",
+        )
+
+    @app.post("/api/v1/orders", response_model=QueuedReplayResponse, status_code=202)
+    def create_order(request: OrderCommandRequest) -> QueuedReplayResponse:
+        scenario = _scenario_for_name(scenarios, request.scenario_name)
+        if request.symbol != scenario.order.symbol:
+            raise HTTPException(status_code=422, detail="symbol does not match the selected replay scenario")
+        order = OrderCommand(
+            order_id=uuid4(),
+            run_id=uuid4(),
+            symbol=request.symbol,
+            side=request.side,
+            order_type=request.order_type,
+            quantity=request.quantity,
+            limit_price=request.limit_price,
+            submitted_at=scenario.order.submitted_at,
+            latency_ms=request.latency_ms,
+        )
+        queued = _new_run(scenario, order)
+        partition = publish_replay(redis, queued, mode=os.getenv("APP_MODE", "public_replay"))
+        return QueuedReplayResponse(
+            run_id=queued.order.run_id,
+            order_id=queued.order.order_id,
+            partition=partition,
+            status="queued",
+        )
+
+    @app.post("/api/v1/watchlists", response_model=WatchlistResponse, status_code=201)
+    def create_watchlist(request: WatchlistCommandRequest) -> WatchlistResponse:
+        watchlist_id = uuid4()
+        created_at = datetime.now(UTC)
+        store.create_watchlist(watchlist_id, request.name, request.symbols, created_at)
+        _publish_watchlist_update(redis, watchlist_id, request.symbols)
+        return WatchlistResponse(watchlist_id=watchlist_id, name=request.name, created_at=created_at, symbols=request.symbols)
+
+    @app.put("/api/v1/watchlists/{watchlist_id}", response_model=WatchlistResponse)
+    def update_watchlist(watchlist_id: UUID, request: WatchlistCommandRequest) -> WatchlistResponse:
+        if not store.update_watchlist(watchlist_id, request.name, request.symbols):
+            raise HTTPException(status_code=404, detail="watchlist not found")
+        _publish_watchlist_update(redis, watchlist_id, request.symbols)
+        watchlist = store.watchlist_for_id(watchlist_id)
+        if watchlist is None:
+            raise HTTPException(status_code=404, detail="watchlist not found")
+        return WatchlistResponse.model_validate(watchlist)
+
+    @app.websocket("/ws/v1/sessions/{run_id}")
+    async def session_updates(websocket: WebSocket, run_id: UUID) -> None:
+        await websocket.accept()
+        replay = store.replay_for_run(run_id)
+        if replay is None:
+            await websocket.close(code=1008)
+            return
+        last_payload = None
+        while True:
+            latest_replay = ReplayResponse.model_validate(store.replay_for_run(run_id))
+            latest_orders = [OrderResponse.model_validate(order) for order in store.orders_for_run(run_id)]
+            market = {
+                symbol: redis.hgetall(market_state_key(str(run_id), symbol))
+                for symbol in (latest_replay.settings.symbols if latest_replay.settings else [])
+            }
+            payload = {
+                "type": "session.snapshot",
+                "replay": latest_replay.model_dump(mode="json"),
+                "orders": [order.model_dump(mode="json") for order in latest_orders],
+                "market": market,
+                "health": {"status": "ready"},
+            }
+            if payload != last_payload:
+                await websocket.send_json(payload)
+                last_payload = payload
+            await asyncio.sleep(0.25)
 
     return app
 
@@ -147,6 +282,39 @@ def main() -> None:
         ),
         host="0.0.0.0",
         port=8000,
+    )
+
+
+def _scenario_for_name(scenarios: dict[str, ScenarioFixture], scenario_name: str) -> ScenarioFixture:
+    scenario = scenarios.get(scenario_name)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="replay scenario not found")
+    return scenario
+
+
+def _replay_response(store: DatabaseStore, run_id: UUID) -> ReplayResponse:
+    result = store.replay_for_run(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="replay not found")
+    return ReplayResponse.model_validate(result)
+
+
+def _new_run(scenario: ScenarioFixture, order: OrderCommand) -> ScenarioFixture:
+    return replace(
+        scenario,
+        order=order,
+        events=tuple(event.model_copy(update={"run_id": order.run_id}) for event in scenario.events),
+    )
+
+
+def _publish_watchlist_update(redis, watchlist_id: UUID, symbols: list[str]) -> None:
+    redis.xadd(
+        INGESTION_CONTROL_STREAM,
+        {
+            "message_type": "watchlist.updated.v1",
+            "watchlist_id": str(watchlist_id),
+            "symbols": json.dumps(symbols),
+        },
     )
 
 

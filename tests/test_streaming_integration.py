@@ -4,7 +4,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -262,6 +262,70 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
     assert replay.json()["counts"]["events"] == len(scenario.events)
     assert watchlists.json() == []
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_command_api_queues_orders_and_watchlists_without_direct_engine_access() -> None:
+    redis_url = os.environ["REDIS_URL"]
+    database_url = os.environ["DATABASE_URL"]
+    redis = Redis.from_url(redis_url, decode_responses=True)
+    store = DatabaseStore(sa.create_engine(database_url))
+    client = TestClient(create_api_app(database_url, redis_url))
+
+    replay = client.post("/api/v1/replays", json={"scenario_name": "complete_market_fill"})
+    queued = client.post(
+        "/api/v1/orders",
+        json={
+            "scenario_name": "price_gap_before_activation",
+            "symbol": "AMZN",
+            "side": "buy",
+            "order_type": "market",
+            "quantity": 10,
+            "latency_ms": 100,
+        },
+    )
+
+    assert replay.status_code == 202
+    assert queued.status_code == 202
+    command = queued.json()
+    run_id = command["run_id"]
+    order_id = command["order_id"]
+    partition = command["partition"]
+    stream = partition_stream_name(run_id, partition)
+    assert [message["message_type"] for _, message in redis.xrange(stream)] == [
+        "replay.started.v1",
+        "order.command.v1",
+        "market.event.v1",
+        "market.event.v1",
+        "market.event.v1",
+        "replay.completed.v1",
+    ]
+
+    run_engine(redis, UUID(run_id), partition, "engine-1")
+    run_persistence(redis, store, UUID(run_id), partition, "persistence-1")
+    order = client.get(f"/api/v1/orders/{order_id}")
+
+    assert order.json()["final_state"] == "filled"
+    assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
+    with client.websocket_connect(f"/ws/v1/sessions/{run_id}") as websocket:
+        snapshot = websocket.receive_json()
+    assert snapshot["type"] == "session.snapshot"
+    assert snapshot["market"]["AMZN"]["ask_price"] == "181.00"
+    assert snapshot["orders"][0]["fills"][0]["triggering_event_id"] == "price-gap-quote-2"
+
+    created_watchlist = client.post("/api/v1/watchlists", json={"name": "Tech", "symbols": ["AAPL", "MSFT"]})
+    updated_watchlist = client.put(
+        f"/api/v1/watchlists/{created_watchlist.json()['watchlist_id']}",
+        json={"name": "Tech", "symbols": ["MSFT", "NVDA"]},
+    )
+    updates = redis.xrange("ingestion.control")
+
+    assert created_watchlist.status_code == 201
+    assert updated_watchlist.json()["symbols"] == ["MSFT", "NVDA"]
+    assert json.loads(updates[-1][1]["symbols"]) == ["MSFT", "NVDA"]
 
 
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:

@@ -111,11 +111,11 @@ Phase 1 is complete.
 
 ### 3B — Order and Replay Commands
 
-- [ ] Implement session-scoped WebSocket messages for market, order, fill, replay, and health updates.
-- [ ] Validate order side, type, quantity, price, symbol, mode, and latency.
-- [ ] Implement order submission and replay-control endpoints.
-- [ ] Publish commands to the owning stream partition rather than mutating engine state directly.
-- [ ] Add watchlist commands that update private-live Alpaca subscriptions without restarting the service.
+- [x] Implement session-scoped WebSocket messages for market, order, fill, replay, and health updates.
+- [x] Validate order side, type, quantity, price, symbol, mode, and latency.
+- [x] Implement order submission and replay-control endpoints.
+- [x] Publish commands to the owning stream partition rather than mutating engine state directly.
+- [x] Add watchlist commands that update private-live Alpaca subscriptions without restarting the service.
 
 **Verification:** An API-created order follows the same engine path and produces the same result as a command-line order; changing a watchlist updates the live subscription without editing environment files or restarting a service.
 

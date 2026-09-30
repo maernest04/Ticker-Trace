@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from market_execution_lab.alpaca import AlpacaSettings, normalize_alpaca_message, require_private_live_mode
+from market_execution_lab.alpaca import AlpacaSettings, normalize_alpaca_message, require_private_live_mode, subscription_actions
 from market_execution_lab.models import QuoteEvent, TradeEvent
 
 
@@ -57,3 +57,10 @@ def test_alpaca_settings_require_credentials_and_symbols(monkeypatch: pytest.Mon
     monkeypatch.setenv("ALPACA_SYMBOLS", "AAPL, MSFT")
 
     assert AlpacaSettings.from_environment().symbols == ("AAPL", "MSFT")
+
+
+def test_subscription_actions_update_an_existing_connection() -> None:
+    assert subscription_actions({"AAPL", "MSFT"}, {"MSFT", "NVDA"}) == (
+        ("subscribe", ["NVDA"]),
+        ("unsubscribe", ["AAPL"]),
+    )

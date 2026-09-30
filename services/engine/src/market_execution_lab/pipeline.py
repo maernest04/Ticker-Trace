@@ -47,7 +47,12 @@ def dead_letter_stream_name(run_id: str, partition: int) -> str:
     return f"pipeline.dead-letter:{run_id}:{partition}"
 
 
-def publish_replay(redis: Redis, scenario: ScenarioFixture, max_queue_depth: int = MAX_QUEUE_DEPTH) -> int:
+def publish_replay(
+    redis: Redis,
+    scenario: ScenarioFixture,
+    max_queue_depth: int = MAX_QUEUE_DEPTH,
+    mode: str = "public_replay",
+) -> int:
     partition = partition_for_symbol(scenario.order.symbol)
     stream = partition_stream_name(str(scenario.order.run_id), partition)
     events = tuple(event.model_copy(update={"partition": partition}) for event in scenario.events)
@@ -57,7 +62,14 @@ def publish_replay(redis: Redis, scenario: ScenarioFixture, max_queue_depth: int
         stream,
         {
             "message_type": "replay.started.v1",
-            "payload": json.dumps({"scenario_name": scenario.name, "started_at": scenario.order.submitted_at.isoformat()}),
+            "payload": json.dumps(
+                {
+                    "scenario_name": scenario.name,
+                    "started_at": scenario.order.submitted_at.isoformat(),
+                    "mode": mode,
+                    "symbols": [scenario.order.symbol],
+                }
+            ),
         },
     )
     redis.xadd(
@@ -266,6 +278,7 @@ def _persist_source_messages(
             if message_type == "replay.started.v1":
                 payload = json.loads(message["payload"])
                 store.create_run(run_id, payload["scenario_name"], datetime.fromisoformat(payload["started_at"]))
+                store.record_replay_settings(run_id, payload["mode"], payload["symbols"])
             elif message_type == "order.command.v1":
                 store.record_order(OrderCommand.model_validate_json(message["payload"]))
             elif message_type == "market.event.v1":

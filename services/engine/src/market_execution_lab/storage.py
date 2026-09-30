@@ -147,6 +147,17 @@ class DatabaseStore:
                 ).on_conflict_do_nothing(constraint="uq_market_events_run_event")
             )
 
+    def record_replay_settings(self, run_id: UUID, mode: str, symbols: list[str]) -> None:
+        with self._engine.begin() as connection:
+            connection.execute(
+                pg_insert(replay_session_settings)
+                .values(run_id=run_id, mode=mode, symbols=symbols)
+                .on_conflict_do_update(
+                    index_elements=[replay_session_settings.c.run_id],
+                    set_={"mode": mode, "symbols": symbols},
+                )
+            )
+
     def complete_run(self, order: OrderCommand, result: ExecutionResult, completed_at: datetime) -> None:
         with self._engine.begin() as connection:
             if result.fills:
@@ -259,6 +270,11 @@ class DatabaseStore:
                 ],
             }
 
+    def orders_for_run(self, run_id: UUID) -> list[dict[str, object]]:
+        with self._engine.connect() as connection:
+            order_ids = list(connection.scalars(sa.select(orders.c.order_id).where(orders.c.run_id == run_id)))
+        return [order for order_id in order_ids if (order := self.order_for_id(order_id)) is not None]
+
     def list_watchlists(self) -> list[dict[str, object]]:
         with self._engine.connect() as connection:
             return [
@@ -274,3 +290,45 @@ class DatabaseStore:
                 }
                 for watchlist in connection.execute(sa.select(watchlists).order_by(watchlists.c.created_at)).mappings()
             ]
+
+    def create_watchlist(self, watchlist_id: UUID, name: str, symbols: list[str], created_at: datetime) -> None:
+        with self._engine.begin() as connection:
+            connection.execute(sa.insert(watchlists).values(watchlist_id=watchlist_id, name=name, created_at=created_at))
+            if symbols:
+                connection.execute(
+                    sa.insert(watchlist_symbols),
+                    [{"watchlist_id": watchlist_id, "symbol": symbol} for symbol in symbols],
+                )
+
+    def update_watchlist(self, watchlist_id: UUID, name: str, symbols: list[str]) -> bool:
+        with self._engine.begin() as connection:
+            updated = connection.execute(
+                sa.update(watchlists).where(watchlists.c.watchlist_id == watchlist_id).values(name=name)
+            )
+            if updated.rowcount == 0:
+                return False
+            connection.execute(sa.delete(watchlist_symbols).where(watchlist_symbols.c.watchlist_id == watchlist_id))
+            if symbols:
+                connection.execute(
+                    sa.insert(watchlist_symbols),
+                    [{"watchlist_id": watchlist_id, "symbol": symbol} for symbol in symbols],
+                )
+            return True
+
+    def watchlist_for_id(self, watchlist_id: UUID) -> dict[str, object] | None:
+        with self._engine.connect() as connection:
+            watchlist = connection.execute(
+                sa.select(watchlists).where(watchlists.c.watchlist_id == watchlist_id)
+            ).mappings().one_or_none()
+            if watchlist is None:
+                return None
+            return {
+                **dict(watchlist),
+                "symbols": list(
+                    connection.scalars(
+                        sa.select(watchlist_symbols.c.symbol)
+                        .where(watchlist_symbols.c.watchlist_id == watchlist_id)
+                        .order_by(watchlist_symbols.c.symbol)
+                    )
+                ),
+            }

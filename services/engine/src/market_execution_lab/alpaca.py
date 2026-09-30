@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -11,6 +11,7 @@ from market_execution_lab.models import MarketEvent, QuoteEvent, TradeEvent
 
 
 ALPACA_IEX_URL = "wss://stream.data.alpaca.markets/v2/iex"
+INGESTION_CONTROL_STREAM = "ingestion.control"
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ async def stream_alpaca(
     run_id: UUID,
     partition_for_symbol: Callable[[str], int],
     publish: Callable[[MarketEvent], Awaitable[None]],
+    subscription_updates: AsyncIterator[tuple[str, ...]] | None = None,
 ) -> None:
     from websockets.asyncio.client import connect
 
@@ -81,8 +83,24 @@ async def stream_alpaca(
     async with connect(settings.url) as websocket:
         await websocket.send(json.dumps({"action": "auth", "key": settings.api_key, "secret": settings.api_secret}))
         await websocket.send(json.dumps({"action": "subscribe", "quotes": list(settings.symbols), "trades": list(settings.symbols)}))
-        async for raw_message in websocket:
-            for message in json.loads(raw_message):
+        symbols = set(settings.symbols)
+        update_task = asyncio.create_task(subscription_updates.__anext__()) if subscription_updates is not None else None
+        while True:
+            receive_task = asyncio.create_task(websocket.recv())
+            tasks = {receive_task}
+            if update_task is not None:
+                tasks.add(update_task)
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if update_task in done:
+                updated_symbols = set(update_task.result())
+                for action, changed_symbols in subscription_actions(symbols, updated_symbols):
+                    await websocket.send(json.dumps({"action": action, "quotes": changed_symbols, "trades": changed_symbols}))
+                symbols = updated_symbols
+                update_task = asyncio.create_task(subscription_updates.__anext__())
+            if receive_task not in done:
+                receive_task.cancel()
+                continue
+            for message in json.loads(receive_task.result()):
                 sequence += 1
                 event = normalize_alpaca_message(
                     message,
@@ -93,6 +111,17 @@ async def stream_alpaca(
                 )
                 if event is not None:
                     await publish(event)
+
+
+def subscription_actions(current_symbols: set[str], updated_symbols: set[str]) -> tuple[tuple[str, list[str]], ...]:
+    additions = sorted(updated_symbols - current_symbols)
+    removals = sorted(current_symbols - updated_symbols)
+    actions: list[tuple[str, list[str]]] = []
+    if additions:
+        actions.append(("subscribe", additions))
+    if removals:
+        actions.append(("unsubscribe", removals))
+    return tuple(actions)
 
 
 def require_private_live_mode() -> None:
