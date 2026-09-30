@@ -56,6 +56,7 @@ def publish_replay(
     scenario: ScenarioFixture,
     max_queue_depth: int = MAX_QUEUE_DEPTH,
     mode: str = "public_replay",
+    dispatch: bool = True,
 ) -> int:
     partition = partition_for_symbol(scenario.order.symbol)
     stream = partition_stream_name(str(scenario.order.run_id), partition)
@@ -90,7 +91,8 @@ def publish_replay(
         published_at=now_seconds(),
         published_messages=len(events) + 3,
     )
-    redis.xadd(ENGINE_JOB_STREAM, {"run_id": str(scenario.order.run_id), "partition": partition})
+    if dispatch:
+        redis.xadd(ENGINE_JOB_STREAM, {"run_id": str(scenario.order.run_id), "partition": partition})
     log_event("replay_published", run_id=str(scenario.order.run_id), partition=partition, event_count=len(events))
     return partition
 

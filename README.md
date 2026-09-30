@@ -22,6 +22,7 @@ The system is an educational and research simulator. It does not place real orde
 - [UI plan](docs/UI_PLAN.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Testing](docs/TESTING.md)
+- [Benchmark methodology](docs/BENCHMARKS.md)
 - [Resume bullets and benchmark metrics](docs/RESUME_BULLETS.md)
 
 ## Current Status
@@ -36,6 +37,7 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Add operational health, readiness, structured logs, and pipeline metrics.
 - [x] Add a credential-gated private Alpaca IEX ingestion adapter.
 - [x] Add the public execution-workspace interface and simulated-order submission.
+- [x] Add reproducible fixed-partition load benchmarks.
 
 ## Technology Stack
 

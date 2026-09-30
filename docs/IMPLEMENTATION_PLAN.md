@@ -170,9 +170,9 @@ Phase 1 is complete.
 
 ### 5B — Load and Scaling Benchmarks
 
-- [ ] Add load tests at increasing event rates.
-- [ ] Compare one worker with multiple workers using fixed stream partitions.
-- [ ] Identify and document the first bottleneck.
+- [x] Add load tests at increasing event rates.
+- [x] Compare one worker with multiple workers using fixed stream partitions.
+- [x] Identify and document the first bottleneck.
 
 **Verification:** Benchmark data shows throughput, latency, lag, and replay-runtime behavior for each worker count.
 

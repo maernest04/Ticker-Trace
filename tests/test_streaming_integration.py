@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from redis import Redis
 
 from market_execution_lab.engine import simulate
+from market_execution_lab.benchmark_service import run_benchmarks
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
 from market_execution_lab.api_service import create_app as create_api_app
 from market_execution_lab.operations_service import create_app
@@ -217,6 +218,28 @@ def test_queue_limit_rejects_a_replay_before_publishing() -> None:
         publish_replay(redis, scenario, max_queue_depth=1)
 
     assert redis.xlen(stream) == 0
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_benchmark_records_fixed_partition_loads_for_each_worker_count() -> None:
+    results = run_benchmarks(
+        os.environ["REDIS_URL"],
+        os.environ["DATABASE_URL"],
+        partition_count=2,
+        events_per_partition=3,
+        worker_counts=[1, 2],
+    )
+
+    assert [result.workers for result in results] == [1, 2]
+    assert all(result.total_events == 6 for result in results)
+    assert all(result.peak_source_depth == 6 for result in results)
+    assert all(result.final_engine_lag == 0 for result in results)
+    assert all(result.final_persistence_lag == 0 for result in results)
+    assert all(result.throughput_events_per_second > 0 for result in results)
+    assert all(result.p95_persistence_processing_ms > 0 for result in results)
 
 
 @pytest.mark.skipif(

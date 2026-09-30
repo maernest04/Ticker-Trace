@@ -1,0 +1,90 @@
+{
+  "methodology": "Each worker count processes the same fixed symbol partitions through Redis Streams, the execution engine, and PostgreSQL persistence. Benchmark dispatch bypasses always-on job workers to prevent duplicate consumers during measurement.",
+  "events_per_partition": 1000,
+  "results": [
+    {
+      "workers": 1,
+      "partitions": [
+        1,
+        2,
+        4,
+        7,
+        8,
+        11,
+        13,
+        14
+      ],
+      "total_events": 8000,
+      "runtime_seconds": 6.996284083004866,
+      "throughput_events_per_second": 1143.4641454073208,
+      "p95_engine_processing_ms": 160.97062500193715,
+      "p95_persistence_processing_ms": 620.3005000061239,
+      "peak_source_depth": 1003,
+      "final_engine_lag": 0,
+      "final_persistence_lag": 0
+    },
+    {
+      "workers": 2,
+      "partitions": [
+        1,
+        2,
+        4,
+        7,
+        8,
+        11,
+        13,
+        14
+      ],
+      "total_events": 8000,
+      "runtime_seconds": 4.249985792004736,
+      "throughput_events_per_second": 1882.3592340120192,
+      "p95_engine_processing_ms": 170.6555419950746,
+      "p95_persistence_processing_ms": 807.2275419981452,
+      "peak_source_depth": 1003,
+      "final_engine_lag": 0,
+      "final_persistence_lag": 0
+    },
+    {
+      "workers": 4,
+      "partitions": [
+        1,
+        2,
+        4,
+        7,
+        8,
+        11,
+        13,
+        14
+      ],
+      "total_events": 8000,
+      "runtime_seconds": 3.7172783330024686,
+      "throughput_events_per_second": 2152.112186212957,
+      "p95_engine_processing_ms": 310.47854199277936,
+      "p95_persistence_processing_ms": 1359.6279160046834,
+      "peak_source_depth": 1003,
+      "final_engine_lag": 0,
+      "final_persistence_lag": 0
+    },
+    {
+      "workers": 8,
+      "partitions": [
+        1,
+        2,
+        4,
+        7,
+        8,
+        11,
+        13,
+        14
+      ],
+      "total_events": 8000,
+      "runtime_seconds": 3.979958583993721,
+      "throughput_events_per_second": 2010.0711681206333,
+      "p95_engine_processing_ms": 547.2167499974603,
+      "p95_persistence_processing_ms": 3015.0329999960377,
+      "peak_source_depth": 1003,
+      "final_engine_lag": 0,
+      "final_persistence_lag": 0
+    }
+  ]
+}
