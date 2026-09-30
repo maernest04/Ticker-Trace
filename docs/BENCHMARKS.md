@@ -32,3 +32,15 @@ Configuration: 8 fixed partitions, 1,000 generated events per partition, local R
 | 8 | 2,010 | 547 | 3,015 | 0 |
 
 The first observed bottleneck is local PostgreSQL persistence contention: throughput stops improving from four to eight workers while p95 persistence time more than doubles. This result applies only to the documented local configuration. The complete machine-readable record is [`benchmarks/phase-5b.json`](../benchmarks/phase-5b.json).
+
+## Phase 5C Validation
+
+The certification command combines an in-memory duplicate-fill validation with a sustained Redis Streams, engine, and PostgreSQL pipeline run. It requires an explicit target rate because the public fixture mode has no observed private-live peak.
+
+Stop the always-on engine and persistence workers, then run this with twice the measured private-live peak rate:
+
+```bash
+market-execution-validate --target-events-per-second 4000 --output benchmarks/phase-5c.json
+```
+
+The default command validates 1,000,000 generated events with injected duplicate identifiers and runs the pipeline for 600 seconds. The resulting JSON is the only source for the final one-million-event and sustained-throughput claims. Do not add those claims to the resume or README until this command passes using a documented target rate.

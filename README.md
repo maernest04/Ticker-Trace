@@ -38,6 +38,7 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Add a credential-gated private Alpaca IEX ingestion adapter.
 - [x] Add the public execution-workspace interface and simulated-order submission.
 - [x] Add reproducible fixed-partition load benchmarks.
+- [x] Add a reproducible high-volume validation command.
 
 ## Technology Stack
 

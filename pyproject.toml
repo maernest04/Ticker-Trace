@@ -33,6 +33,7 @@ market-execution-operations = "market_execution_lab.operations_service:main"
 market-execution-ingestion = "market_execution_lab.ingestion_service:main"
 market-execution-api = "market_execution_lab.api_service:main"
 market-execution-benchmark = "market_execution_lab.benchmark_service:main"
+market-execution-validate = "market_execution_lab.validation_service:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["services/engine/src"]

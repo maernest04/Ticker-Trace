@@ -178,6 +178,7 @@ Phase 1 is complete.
 
 ### 5C — Final Measured Claims
 
+- [x] Add a reproducible validation command and record the initial benchmark result.
 - [ ] Record final benchmark results.
 - [ ] Confirm one million generated events produce zero duplicate fills.
 - [ ] Confirm the system sustains twice the observed live peak for ten minutes without unbounded lag.
