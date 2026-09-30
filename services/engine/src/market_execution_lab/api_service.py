@@ -15,7 +15,7 @@ import uvicorn
 
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
-from market_execution_lab.models import OrderCommand, OrderSide, OrderType
+from market_execution_lab.models import OrderCommand, OrderSide, OrderType, QuoteEvent, TradeEvent
 from market_execution_lab.observability import configure_logging, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
 from market_execution_lab.pipeline import publish_replay
@@ -25,6 +25,31 @@ from market_execution_lab.streaming import market_state_key
 
 class SymbolResponse(BaseModel):
     symbol: str
+
+
+class ConfigurationResponse(BaseModel):
+    mode: str
+
+
+class ScenarioMarketResponse(BaseModel):
+    event_time: datetime
+    bid_price: Decimal | None
+    bid_size: int | None
+    ask_price: Decimal | None
+    ask_size: int | None
+    last_trade_price: Decimal | None
+
+
+class ScenarioResponse(BaseModel):
+    name: str
+    symbol: str
+    default_side: OrderSide
+    default_order_type: OrderType
+    default_quantity: int
+    default_limit_price: Decimal | None
+    default_latency_ms: int
+    replay_change_percent: Decimal | None
+    market: ScenarioMarketResponse
 
 
 class MarketStateResponse(BaseModel):
@@ -178,6 +203,14 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     def symbols() -> list[SymbolResponse]:
         return [SymbolResponse(symbol=symbol) for symbol in store.list_symbols()]
 
+    @app.get("/api/v1/configuration", response_model=ConfigurationResponse)
+    def configuration() -> ConfigurationResponse:
+        return ConfigurationResponse(mode=mode)
+
+    @app.get("/api/v1/scenarios", response_model=list[ScenarioResponse])
+    def scenario_list() -> list[ScenarioResponse]:
+        return [_scenario_response(scenario) for scenario in scenarios.values()]
+
     @app.get("/api/v1/market/{symbol}", response_model=MarketStateResponse)
     def market(symbol: str, run_id: UUID) -> MarketStateResponse:
         state = redis.hgetall(market_state_key(str(run_id), symbol.upper()))
@@ -314,6 +347,43 @@ def _scenario_for_name(scenarios: dict[str, ScenarioFixture], scenario_name: str
     if scenario is None:
         raise HTTPException(status_code=404, detail="replay scenario not found")
     return scenario
+
+
+def _scenario_response(scenario: ScenarioFixture) -> ScenarioResponse:
+    bid_price = bid_size = ask_price = ask_size = last_trade_price = None
+    first_price = last_price = None
+    for event in scenario.events:
+        if isinstance(event, QuoteEvent):
+            bid_price = event.bid_price
+            bid_size = event.bid_size
+            ask_price = event.ask_price
+            ask_size = event.ask_size
+            price = (event.bid_price + event.ask_price) / Decimal(2)
+        elif isinstance(event, TradeEvent):
+            last_trade_price = event.price
+            price = event.price
+        if first_price is None:
+            first_price = price
+        last_price = price
+    order = scenario.order
+    return ScenarioResponse(
+        name=scenario.name,
+        symbol=order.symbol,
+        default_side=order.side,
+        default_order_type=order.order_type,
+        default_quantity=order.quantity,
+        default_limit_price=order.limit_price,
+        default_latency_ms=order.latency_ms,
+        replay_change_percent=(((last_price - first_price) / first_price) * Decimal(100)).quantize(Decimal("0.01")) if first_price and last_price else None,
+        market=ScenarioMarketResponse(
+            event_time=scenario.events[-1].event_time,
+            bid_price=bid_price,
+            bid_size=bid_size,
+            ask_price=ask_price,
+            ask_size=ask_size,
+            last_trade_price=last_trade_price,
+        ),
+    )
 
 
 def _application_mode() -> str:

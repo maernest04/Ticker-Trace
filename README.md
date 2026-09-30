@@ -35,6 +35,7 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Complete the core streaming pipeline.
 - [x] Add operational health, readiness, structured logs, and pipeline metrics.
 - [x] Add a credential-gated private Alpaca IEX ingestion adapter.
+- [x] Add the public execution-workspace interface and simulated-order submission.
 
 ## Technology Stack
 
@@ -54,6 +55,8 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 - **Private live mode:** streams real IEX trades and quotes through an operator-owned Alpaca account. This mode is not publicly redistributed.
 - **Public demo mode:** uses generated or explicitly redistribution-safe replay data and exposes the complete product workflow without vendor credentials.
 
-## Implementation Gate
+## Run the Execution Workspace
 
-Phases 1 and 2 are complete. The next phase exposes the pipeline through the application API.
+Start Redis and PostgreSQL, apply migrations, and run the API in public replay mode. From `frontend`, copy `.env.example` to `.env.local`, then run `npm install` and `npm run dev`. The interface is available at `http://localhost:3000` and proxies browser API calls to `http://localhost:8000` by default.
+
+The workspace queues a simulated order. The order-result timeline and live worker updates are Phase 4B.

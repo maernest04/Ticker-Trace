@@ -252,12 +252,18 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     client = TestClient(create_api_app(database_url, redis_url))
 
     symbols = client.get("/api/v1/symbols")
+    configuration = client.get("/api/v1/configuration")
+    scenarios = client.get("/api/v1/scenarios")
     market = client.get(f"/api/v1/market/{scenario.order.symbol}?run_id={scenario.order.run_id}")
     order = client.get(f"/api/v1/orders/{scenario.order.order_id}")
     replay = client.get(f"/api/v1/replays/{scenario.order.run_id}")
     watchlists = client.get("/api/v1/watchlists")
 
     assert {item["symbol"] for item in symbols.json()} >= {scenario.order.symbol}
+    assert configuration.json() == {"mode": "public_replay"}
+    assert any(item["name"] == "price_gap_before_activation" for item in scenarios.json())
+    assert next(item for item in scenarios.json() if item["name"] == "price_gap_before_activation")["market"]["ask_price"] == "181.00"
+    assert next(item for item in scenarios.json() if item["name"] == "price_gap_before_activation")["replay_change_percent"] == "0.56"
     assert market.json()["ask_price"] == "181.00"
     assert order.json()["final_state"] == "filled"
     assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")

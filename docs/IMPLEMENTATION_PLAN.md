@@ -128,28 +128,33 @@ Phase 1 is complete.
 
 ## Phase 4: User Interface
 
-### 4A — Execution Workspace
+### 4A — Trading Terminal Workspace
 
-- [ ] Implement the single execution-lab workspace before secondary system views.
-- [ ] Add mode, symbol, and replay-dataset selection.
-- [ ] Add current quote/trade state and the simulated-order form.
+- [x] Replace the prototype card layout with one desktop-first execution terminal.
+- [x] Add a terminal header with mode, selected symbol, replay dataset, and connection status.
+- [x] Add a persistent left watchlist with symbols, last price, and change state from the selected replay data.
+- [x] Place the selected symbol's bid, ask, spread, visible size, last trade, and event timestamp in the central market panel.
+- [x] Place the simulated order ticket on the right with side, type, quantity, limit price, artificial latency, and submit controls.
+- [x] Add a bottom execution panel with an explicit queued or empty state; real-time order details remain 4B.
 
-**Verification:** A user can select a replay scenario and submit a valid simulated order through the browser.
+**Verification:** A user can select a replay scenario, submit a valid simulated order, and understand the market context and queue state without leaving the terminal.
 
 ### 4B — Live Result Explanation
 
-- [ ] Add live WebSocket updates.
+- [ ] Add a bounded replay-event read endpoint and include recent events in session-scoped WebSocket updates.
+- [ ] Add a compact price trace and event tape to the central market panel without rendering every event received by the backend.
+- [ ] Add live WebSocket updates to the watchlist, quote state, and bottom execution panel.
 - [ ] Add clear loading, disconnected, empty, and error states.
 - [ ] Display quote freshness, order activation, triggering events, fills, and computed execution metrics.
 - [ ] Display execution-model limitations next to results.
 
-**Verification:** A user can follow an order from submission to final state and identify the event that caused every fill.
+**Verification:** A user can follow an order from submission to final state in the bottom execution panel and identify the market event that caused every fill.
 
 ### 4C — Replay Comparison and Health
 
-- [ ] Add replay speed controls and parameter comparison.
-- [ ] Add the system-health view after the primary workspace is complete.
-- [ ] Confirm usability on common desktop dimensions.
+- [ ] Add replay speed controls and parameter comparison in the terminal header and bottom panel.
+- [ ] Add a compact health and connection view after the primary terminal workflow is complete.
+- [ ] Confirm usability at common desktop dimensions before attempting a mobile layout.
 
 **Verification:** A user can complete the MVP workflow without terminal access.
 
