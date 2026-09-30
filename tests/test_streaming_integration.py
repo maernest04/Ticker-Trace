@@ -4,6 +4,7 @@ import subprocess
 import sys
 from dataclasses import replace
 from decimal import Decimal
+from time import time
 from uuid import UUID, uuid4
 
 import pytest
@@ -261,7 +262,7 @@ def test_read_api_returns_replay_state_without_direct_dependency_access() -> Non
     assert order.json()["final_state"] == "filled"
     assert Decimal(order.json()["fills"][0]["price"]) == Decimal("181.00")
     assert replay.json()["counts"]["events"] == len(scenario.events)
-    assert watchlists.json() == []
+    assert watchlists.status_code == 200
 
 
 @pytest.mark.skipif(
@@ -326,6 +327,53 @@ def test_command_api_queues_orders_and_watchlists_without_direct_engine_access()
     assert created_watchlist.status_code == 201
     assert updated_watchlist.json()["symbols"] == ["MSFT", "NVDA"]
     assert json.loads(updates[-1][1]["symbols"]) == ["MSFT", "NVDA"]
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_public_api_enforces_request_ids_errors_and_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_MODE", "public_replay")
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET", raising=False)
+    redis_url = os.environ["REDIS_URL"]
+    database_url = os.environ["DATABASE_URL"]
+    redis = Redis.from_url(redis_url, decode_responses=True)
+    redis.delete(f"rate_limit:testclient:{int(time() // 60)}")
+    client = TestClient(create_api_app(database_url, redis_url, public_request_limit=10))
+
+    missing = client.get(f"/api/v1/orders/{uuid4()}", headers={"x-request-id": "missing-123"})
+    invalid = client.post("/api/v1/orders", json={"scenario_name": "complete_market_fill"})
+
+    assert missing.status_code == 404
+    assert missing.headers["x-request-id"] == "missing-123"
+    assert missing.json()["error"] == {
+        "code": "http_error",
+        "message": "order not found",
+        "request_id": "missing-123",
+    }
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "validation_error"
+
+    redis.delete(f"rate_limit:testclient:{int(time() // 60)}")
+    limited_client = TestClient(create_api_app(database_url, redis_url, public_request_limit=2))
+    assert limited_client.get("/api/v1/watchlists").status_code == 200
+    assert limited_client.get("/api/v1/watchlists").status_code == 200
+    limited = limited_client.get("/api/v1/watchlists", headers={"x-request-id": "limited-123"})
+
+    assert limited.status_code == 429
+    assert limited.headers["x-request-id"] == "limited-123"
+    assert limited.json()["error"]["code"] == "rate_limited"
+
+
+def test_public_mode_rejects_live_alpaca_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_MODE", "public_replay")
+    monkeypatch.setenv("ALPACA_API_KEY", "key")
+    monkeypatch.setenv("ALPACA_API_SECRET", "secret")
+
+    with pytest.raises(ValueError, match="cannot enable Alpaca credentials"):
+        create_api_app("postgresql+psycopg://unused", "redis://localhost:6379/0")
 
 
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:

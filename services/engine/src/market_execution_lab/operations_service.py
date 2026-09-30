@@ -1,8 +1,9 @@
 import os
+from time import time
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from redis import Redis
 from redis.exceptions import RedisError
 import uvicorn
@@ -16,17 +17,40 @@ from market_execution_lab.observability import (
 from market_execution_lab.streaming import partition_stream_name
 
 
-def create_app(redis_url: str) -> FastAPI:
+def create_app(redis_url: str, public_request_limit: int | None = None) -> FastAPI:
     redis = Redis.from_url(redis_url, decode_responses=True)
     app = FastAPI()
     app.state.redis = redis
+    app.state.public_request_limit = public_request_limit
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request_id = request.headers.get("x-request-id", str(uuid4()))
         token = request_id_context.set(request_id)
         try:
-            response = await call_next(request)
+            if app.state.public_request_limit is not None and request.url.path.startswith("/api/"):
+                bucket = int(time() // 60)
+                client = request.client.host if request.client else "unknown"
+                key = f"rate_limit:{client}:{bucket}"
+                try:
+                    count = redis.incr(key)
+                    if count == 1:
+                        redis.expire(key, 60)
+                except RedisError:
+                    response = JSONResponse(
+                        status_code=503,
+                        content={"error": {"code": "service_unavailable", "message": "rate limit unavailable", "request_id": request_id}},
+                    )
+                else:
+                    if count > app.state.public_request_limit:
+                        response = JSONResponse(
+                            status_code=429,
+                            content={"error": {"code": "rate_limited", "message": "request limit exceeded", "request_id": request_id}},
+                        )
+                    else:
+                        response = await call_next(request)
+            else:
+                response = await call_next(request)
         finally:
             request_id_context.reset(token)
         response.headers["x-request-id"] = request_id

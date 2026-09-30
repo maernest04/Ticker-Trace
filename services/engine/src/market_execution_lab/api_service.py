@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 import sqlalchemy as sa
 import uvicorn
@@ -14,7 +16,7 @@ import uvicorn
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
 from market_execution_lab.models import OrderCommand, OrderSide, OrderType
-from market_execution_lab.observability import configure_logging
+from market_execution_lab.observability import configure_logging, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
 from market_execution_lab.pipeline import publish_replay
 from market_execution_lab.storage import DatabaseStore
@@ -144,11 +146,33 @@ class WatchlistCommandRequest(BaseModel):
         return symbols
 
 
-def create_app(database_url: str, redis_url: str) -> FastAPI:
-    app = create_operations_app(redis_url)
+def create_app(database_url: str, redis_url: str, public_request_limit: int | None = None) -> FastAPI:
+    mode = _application_mode()
+    request_limit = public_request_limit if mode == "public_replay" else None
+    if request_limit is None and mode == "public_replay":
+        request_limit = int(os.getenv("PUBLIC_REQUEST_LIMIT", "60"))
+    app = create_operations_app(redis_url, request_limit)
     store = DatabaseStore(sa.create_engine(database_url))
     redis = app.state.redis
     scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_: Request, error: HTTPException) -> JSONResponse:
+        request_id = request_id_context.get()
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"error": {"code": "http_error", "message": str(error.detail), "request_id": request_id}},
+            headers={"x-request-id": request_id},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+        request_id = request_id_context.get()
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "validation_error", "message": "request validation failed", "request_id": request_id}},
+            headers={"x-request-id": request_id},
+        )
 
     @app.get("/api/v1/symbols", response_model=list[SymbolResponse])
     def symbols() -> list[SymbolResponse]:
@@ -192,7 +216,7 @@ def create_app(database_url: str, redis_url: str) -> FastAPI:
         scenario = _scenario_for_name(scenarios, request.scenario_name)
         order = scenario.order.model_copy(update={"run_id": uuid4(), "order_id": uuid4()})
         queued = _new_run(scenario, order)
-        partition = publish_replay(redis, queued, mode=os.getenv("APP_MODE", "public_replay"))
+        partition = publish_replay(redis, queued, mode=mode)
         return QueuedReplayResponse(
             run_id=queued.order.run_id,
             order_id=queued.order.order_id,
@@ -217,7 +241,7 @@ def create_app(database_url: str, redis_url: str) -> FastAPI:
             latency_ms=request.latency_ms,
         )
         queued = _new_run(scenario, order)
-        partition = publish_replay(redis, queued, mode=os.getenv("APP_MODE", "public_replay"))
+        partition = publish_replay(redis, queued, mode=mode)
         return QueuedReplayResponse(
             run_id=queued.order.run_id,
             order_id=queued.order.order_id,
@@ -290,6 +314,15 @@ def _scenario_for_name(scenarios: dict[str, ScenarioFixture], scenario_name: str
     if scenario is None:
         raise HTTPException(status_code=404, detail="replay scenario not found")
     return scenario
+
+
+def _application_mode() -> str:
+    mode = os.getenv("APP_MODE", "public_replay")
+    if mode not in {"public_replay", "private_live"}:
+        raise ValueError("APP_MODE must be public_replay or private_live")
+    if mode == "public_replay" and (os.getenv("ALPACA_API_KEY") or os.getenv("ALPACA_API_SECRET")):
+        raise ValueError("public_replay mode cannot enable Alpaca credentials")
+    return mode
 
 
 def _replay_response(store: DatabaseStore, run_id: UUID) -> ReplayResponse:

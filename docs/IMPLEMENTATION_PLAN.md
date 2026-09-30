@@ -121,8 +121,8 @@ Phase 1 is complete.
 
 ### 3C — Safety Boundary
 
-- [ ] Enforce public-demo mode at the server rather than trusting the client.
-- [ ] Add consistent errors, request IDs, and basic public rate limits.
+- [x] Enforce public-demo mode at the server rather than trusting the client.
+- [x] Add consistent errors, request IDs, and basic public rate limits.
 
 **Verification:** Automated integration tests cover the primary API and streaming workflow; public mode cannot enable the live adapter or expose credentials.
 
