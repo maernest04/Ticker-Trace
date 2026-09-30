@@ -50,11 +50,23 @@ Required fixture scenarios:
 
 - Stable spread with a complete market-order fill
 - Visible size smaller than order quantity, producing partial fills
+- Volatile price swing across the configured activation window
 - Limit price never reached
 - Limit price crossed after configured latency
 - Price gap between submission and activation
 - Duplicate and stale quote events
 - Malformed event routed to dead letter
+
+## Fault Matrix
+
+| Fault | Deterministic outcome | Coverage |
+| --- | --- | --- |
+| Delayed activation | The first event at or after the latency window can activate the order. | `limit_reached_after_latency` |
+| Duplicate event | The event is counted once and cannot create an additional fill. | `test_duplicate_quote_cannot_create_a_second_fill` |
+| Stale event | Older event time/sequence cannot replace current market state. | `test_stale_quote_does_not_replace_newer_market_state` |
+| Malformed or missing fields | The invalid source message is dead-lettered and valid replay messages complete. | `test_invalid_message_is_dead_lettered_without_stopping_the_replay` |
+| Engine worker loss | A replacement consumer claims pending messages and reaches the pure-simulation result. | `test_replacement_engine_recovers_pending_messages_after_a_worker_dies` |
+| Temporary database failure | The result remains pending until a replacement persistence worker completes it. | `test_persistence_recovers_after_a_temporary_database_failure` |
 
 ## Load Tests
 

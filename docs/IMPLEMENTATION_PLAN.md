@@ -162,9 +162,9 @@ Phase 1 is complete.
 
 ### 5A — Correctness and Fault Matrix
 
-- [ ] Create fixed generated normal, volatile, illiquid, and gap scenarios.
-- [ ] Test delayed, duplicated, malformed, missing, and stale events.
-- [ ] Test worker and dependency failures.
+- [x] Create fixed generated normal, volatile, illiquid, and gap scenarios.
+- [x] Test delayed, duplicated, malformed, missing, and stale events.
+- [x] Test worker and dependency failures.
 
 **Verification:** Fault scenarios produce documented, deterministic, and safe outcomes.
 

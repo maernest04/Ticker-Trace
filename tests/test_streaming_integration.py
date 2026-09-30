@@ -155,14 +155,15 @@ def test_replacement_engine_recovers_pending_messages_after_a_worker_dies() -> N
     os.getenv("RUN_STREAMING_INTEGRATION") != "1",
     reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
 )
-def test_malformed_message_is_dead_lettered_without_stopping_the_replay() -> None:
+@pytest.mark.parametrize("invalid_payload", ["not-json", '{"event_type":"market.quote.v1"}'])
+def test_invalid_message_is_dead_lettered_without_stopping_the_replay(invalid_payload: str) -> None:
     template = next(scenario for scenario in generated_scenarios() if scenario.name == "complete_market_fill")
     scenario = _new_run(template)
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
     store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
     partition = publish_replay(redis, scenario)
     stream = partition_stream_name(str(scenario.order.run_id), partition)
-    redis.xadd(stream, {"message_type": "market.event.v1", "payload": "not-json"})
+    redis.xadd(stream, {"message_type": "market.event.v1", "payload": invalid_payload})
 
     actual = run_engine(redis, scenario.order.run_id, partition, "engine-1")
     run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1")
@@ -171,6 +172,35 @@ def test_malformed_message_is_dead_lettered_without_stopping_the_replay() -> Non
     assert actual == simulate(scenario.order, scenario.events)
     assert {entry["group"] for _, entry in dead_letters} == {ENGINE_GROUP, PERSISTENCE_GROUP}
     assert store.counts_for_run(scenario.order.run_id)["events"] == len(scenario.events)
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_STREAMING_INTEGRATION") != "1",
+    reason="set RUN_STREAMING_INTEGRATION=1 with local Redis and PostgreSQL",
+)
+def test_persistence_recovers_after_a_temporary_database_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    scenario = _new_run(generated_scenarios()[0])
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    partition = publish_replay(redis, scenario)
+    run_engine(redis, scenario.order.run_id, partition, "engine-1")
+    original_complete_run = store.complete_run
+
+    def unavailable(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(store, "complete_run", unavailable)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        run_persistence(redis, store, scenario.order.run_id, partition, "persistence-1")
+
+    results = result_stream_name(str(scenario.order.run_id), partition)
+    assert redis.xpending(results, PERSISTENCE_GROUP)["pending"] == 1
+
+    monkeypatch.setattr(store, "complete_run", original_complete_run)
+    run_persistence(redis, store, scenario.order.run_id, partition, "replacement-persistence", recovery_idle_ms=0)
+
+    assert redis.xpending(results, PERSISTENCE_GROUP)["pending"] == 0
+    assert store.counts_for_run(scenario.order.run_id)["fills"] == 1
 
 
 @pytest.mark.skipif(

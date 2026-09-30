@@ -8,6 +8,7 @@ def test_generated_scenarios_cover_phase_one_execution_cases() -> None:
     assert [scenario.name for scenario in scenarios] == [
         "complete_market_fill",
         "partial_visible_liquidity",
+        "volatile_price_swing",
         "limit_never_reached",
         "limit_reached_after_latency",
         "price_gap_before_activation",

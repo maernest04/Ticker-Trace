@@ -68,6 +68,16 @@ def test_market_order_reports_worse_execution_after_price_gap() -> None:
     assert result.metrics.latency_impact == Decimal("1.00")
 
 
+def test_volatile_fixture_reports_the_price_change_after_activation() -> None:
+    scenario = _scenario("volatile_price_swing")
+
+    result = simulate(scenario.order, scenario.events)
+
+    assert result.state is OrderState.FILLED
+    assert result.fills[0].price == Decimal("502.00")
+    assert result.metrics.latency_impact == Decimal("2.00")
+
+
 def test_duplicate_quote_cannot_create_a_second_fill() -> None:
     scenario = _scenario("partial_visible_liquidity")
 
