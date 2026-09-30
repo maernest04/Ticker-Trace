@@ -46,7 +46,7 @@ def validate_duplicate_fills(event_count: int, duplicate_every: int) -> Duplicat
             symbol="VALID",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=10,
+            quantity=1_000,
             submitted_at=submitted_at,
         )
     )
@@ -62,9 +62,9 @@ def validate_duplicate_fills(event_count: int, duplicate_every: int) -> Duplicat
                 sequence=sequence,
                 partition=0,
                 bid_price=Decimal("99.99"),
-                bid_size=100,
+                bid_size=10,
                 ask_price=Decimal("100.00"),
-                ask_size=100,
+                ask_size=10,
             )
         )
     result = engine.finalize()
@@ -130,11 +130,14 @@ def main() -> None:
     parser.add_argument("--events-per-partition", type=int, default=1_000)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--duration-seconds", type=float, default=600)
-    parser.add_argument("--target-events-per-second", type=float, required=True)
+    parser.add_argument("--target-events-per-second", type=float)
+    parser.add_argument("--skip-sustained-pipeline", action="store_true")
     parser.add_argument("--output", type=Path)
     arguments = parser.parse_args()
     duplicate_fills = validate_duplicate_fills(arguments.duplicate_events, arguments.duplicate_every)
-    sustained_pipeline = validate_sustained_pipeline(
+    if not arguments.skip_sustained_pipeline and arguments.target_events_per_second is None:
+        parser.error("--target-events-per-second is required unless --skip-sustained-pipeline is set")
+    sustained_pipeline = None if arguments.skip_sustained_pipeline else validate_sustained_pipeline(
         arguments.redis_url,
         arguments.database_url,
         arguments.partitions,
@@ -145,8 +148,8 @@ def main() -> None:
     )
     payload = {
         "duplicate_fill_validation": asdict(duplicate_fills),
-        "sustained_pipeline_validation": asdict(sustained_pipeline),
-        "passed": duplicate_fills.passed and sustained_pipeline.passed,
+        "sustained_pipeline_validation": asdict(sustained_pipeline) if sustained_pipeline else None,
+        "passed": duplicate_fills.passed and (sustained_pipeline.passed if sustained_pipeline else True),
     }
     serialized = json.dumps(payload, indent=2)
     if arguments.output:

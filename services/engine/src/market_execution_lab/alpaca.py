@@ -90,7 +90,15 @@ async def stream_alpaca(
             tasks = {receive_task}
             if update_task is not None:
                 tasks.add(update_task)
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            try:
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            except BaseException:
+                receive_task.cancel()
+                await asyncio.gather(receive_task, return_exceptions=True)
+                if update_task is not None:
+                    update_task.cancel()
+                    await asyncio.gather(update_task, return_exceptions=True)
+                raise
             if update_task in done:
                 updated_symbols = set(update_task.result())
                 for action, changed_symbols in subscription_actions(symbols, updated_symbols):

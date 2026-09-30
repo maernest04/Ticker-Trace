@@ -6,5 +6,6 @@ def test_duplicate_fill_validation_counts_duplicate_events_without_duplicate_fil
 
     assert result.received_events == 100
     assert result.duplicate_events == 10
+    assert result.fills == 90
     assert result.duplicate_fills == 0
     assert result.passed

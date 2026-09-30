@@ -37,6 +37,12 @@ The first observed bottleneck is local PostgreSQL persistence contention: throug
 
 The certification command combines an in-memory duplicate-fill validation with a sustained Redis Streams, engine, and PostgreSQL pipeline run. It requires an explicit target rate because the public fixture mode has no observed private-live peak.
 
+Measure that peak from the private Alpaca IEX feed before starting the certification:
+
+```bash
+APP_MODE=private_live market-execution-measure-live-peak --duration-seconds 60
+```
+
 Stop the always-on engine and persistence workers, then run this with twice the measured private-live peak rate:
 
 ```bash
@@ -44,3 +50,9 @@ market-execution-validate --target-events-per-second 4000 --output benchmarks/ph
 ```
 
 The default command validates 1,000,000 generated events with injected duplicate identifiers and runs the pipeline for 600 seconds. The resulting JSON is the only source for the final one-million-event and sustained-throughput claims. Do not add those claims to the resume or README until this command passes using a documented target rate.
+
+To run only the one-million-event duplicate-fill check while a live-rate measurement is unavailable:
+
+```bash
+market-execution-validate --skip-sustained-pipeline --output benchmarks/phase-5c-engine.json
+```

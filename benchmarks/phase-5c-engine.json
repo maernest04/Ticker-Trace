@@ -1,0 +1,11 @@
+{
+  "duplicate_fill_validation": {
+    "received_events": 1000000,
+    "duplicate_events": 10000,
+    "fills": 100,
+    "duplicate_fills": 0,
+    "passed": true
+  },
+  "sustained_pipeline_validation": null,
+  "passed": true
+}
