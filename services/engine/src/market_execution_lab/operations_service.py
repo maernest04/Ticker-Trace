@@ -18,7 +18,7 @@ from market_execution_lab.streaming import partition_stream_name
 
 
 def create_app(redis_url: str, public_request_limit: int | None = None) -> FastAPI:
-    redis = Redis.from_url(redis_url, decode_responses=True)
+    redis = Redis.from_url(redis_url, decode_responses=True, socket_timeout=10, socket_connect_timeout=5)
     app = FastAPI()
     app.state.redis = redis
     app.state.public_request_limit = public_request_limit
@@ -28,7 +28,7 @@ def create_app(redis_url: str, public_request_limit: int | None = None) -> FastA
         request_id = request.headers.get("x-request-id", str(uuid4()))
         token = request_id_context.set(request_id)
         try:
-            if app.state.public_request_limit is not None and request.url.path.startswith("/api/"):
+            if app.state.public_request_limit is not None and request.url.path.startswith("/api/") and request.url.path not in {"/api/v1/configuration", "/api/v1/scenarios"}:
                 bucket = int(time() // 60)
                 client = request.client.host if request.client else "unknown"
                 key = f"rate_limit:{client}:{bucket}"

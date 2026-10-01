@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -117,6 +117,29 @@ def sqlalchemy_url(url: str) -> str:
 class DatabaseStore:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
+
+    def prune_public_replays(self, scenario_names: tuple[str, ...]) -> int:
+        with self._engine.begin() as connection:
+            eligible = sa.select(replay_runs.c.run_id).join(replay_session_settings).where(
+                replay_session_settings.c.mode == "public_replay",
+                replay_runs.c.scenario_name.in_(scenario_names),
+                replay_runs.c.status == "completed",
+            )
+            recent = eligible.order_by(replay_runs.c.completed_at.desc()).limit(1000)
+            expired = list(connection.scalars(eligible.where(sa.or_(
+                replay_runs.c.completed_at < datetime.now(UTC) - timedelta(days=7),
+                replay_runs.c.run_id.not_in(recent),
+            )).limit(100)))
+            if not expired:
+                return 0
+            order_ids = sa.select(orders.c.order_id).where(orders.c.run_id.in_(expired))
+            connection.execute(sa.delete(fills).where(fills.c.order_id.in_(order_ids)))
+            connection.execute(sa.delete(order_state_transitions).where(order_state_transitions.c.order_id.in_(order_ids)))
+            connection.execute(sa.delete(orders).where(orders.c.run_id.in_(expired)))
+            connection.execute(sa.delete(market_events).where(market_events.c.run_id.in_(expired)))
+            connection.execute(sa.delete(replay_session_settings).where(replay_session_settings.c.run_id.in_(expired)))
+            connection.execute(sa.delete(replay_runs).where(replay_runs.c.run_id.in_(expired)))
+            return len(expired)
 
     def create_run(self, run_id: UUID, scenario_name: str, started_at: datetime) -> None:
         with self._engine.begin() as connection:

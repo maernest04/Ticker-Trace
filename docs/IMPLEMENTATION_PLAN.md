@@ -211,17 +211,23 @@ Phase 1 is complete.
 
 - [x] Define the idle state for Vercel, Fly, Redis, and Supabase with no background keepalive traffic.
 - [x] Add a Fly health endpoint that does not touch Redis or PostgreSQL.
-- [x] Increase worker blocking intervals and trim global job streams to reduce idle Redis commands and unbounded queue history.
+- [x] Increase local queue-worker blocking intervals and remove acknowledged global jobs without trimming unread work.
 - [x] Add a 15-minute expiration policy for completed replay streams, cached state, dead letters, and metrics.
-- [ ] Configure Fly API scale-to-zero behavior after demand-driven worker startup is available.
-- [ ] Add demand-driven worker lifecycle control so engine and persistence workers run only while a replay lease is active.
-- [ ] Ensure worker processes do not poll Redis while stopped or when no replay lease exists.
-- [ ] Add replay leases, startup readiness, duplicate-start protection, and bounded idle shutdown.
-- [ ] Add Redis stream/key trimming and PostgreSQL replay retention based on measured storage growth.
-- [ ] Add provider usage checks for Redis commands, Redis data size, Redis bandwidth, database size, and database egress.
-- [ ] Add failure tests for worker startup, worker shutdown, Redis outage, and abandoned replay leases.
+- [x] Configure Fly API autostop with zero minimum running machines.
+- [x] Start exactly one engine and one persistence machine on replay demand through the Fly Machines API.
+- [x] Replace public worker queue polling with private HTTP job dispatch; retain queue mode for local benchmarks and private live operation.
+- [x] Check startup readiness, tolerate concurrent start conflicts, reject duplicate in-flight run IDs, and shut workers down after 60 idle seconds without interrupting active work.
+- [x] Expire published-but-abandoned source streams after one hour and completed replay state after 15 minutes.
+- [x] Enforce a shared 1,000 replay-attempt monthly allowance and prune completed generated public runs older than seven days or beyond the newest 1,000, at most 100 runs per successful submission.
+- [x] Close completed WebSockets and bound browser retries and incomplete server sessions.
+- [x] Document manual provider usage checks without adding scheduled traffic that would defeat idle shutdown.
+- [x] Add startup, idle shutdown, active-job protection, Redis-outage, retention, and abandoned-source expiration tests.
+- [ ] Stage the app-scoped Fly worker token, deploy with no spare machines, and redeploy the frontend.
+- [ ] Verify deployed cold-start, concurrent replay behavior, and 24-hour idle provider usage.
 
-**Verification:** After 24 hours with no dashboard activity, no worker machines are running, Redis receives no application commands, PostgreSQL receives no keepalive traffic, and the providers remain within free-tier quotas. Opening the dashboard starts one bounded replay path and returns the system to idle after completion.
+**Local verification:** 60 tests passed against local Redis/PostgreSQL; the frontend production build and Fly configuration validation passed. Demand dispatch is tested through the API and both workers, with persisted results, TTLs, and WebSocket closure. Retention tests preserve active, private-live, and benchmark records.
+
+**Deployment acceptance (pending):** After 24 hours with no dashboard activity, no application machines are running, Redis receives no application commands, and PostgreSQL receives no application keepalive traffic. Starting a replay wakes the two existing worker machines and returns to idle after completion. This reduces resource use; it does not guarantee zero Fly charges or immunity to arbitrary public traffic.
 
 ### 6D — Operational Validation
 

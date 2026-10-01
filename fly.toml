@@ -12,18 +12,19 @@ primary_region = "sjc"
   PUBLIC_REQUEST_LIMIT = "60"
   REPLAY_STATE_TTL_SECONDS = "900"
   WORKER_POLL_BLOCK_MS = "30000"
+  FLY_WORKER_LIFECYCLE = "on"
 
 [processes]
   api = "market-execution-api"
-  engine = "market-execution-engine --forever"
-  persistence = "market-execution-persistence --forever"
+  engine = "env WORKER_ROLE=engine market-execution-worker"
+  persistence = "env WORKER_ROLE=persistence market-execution-worker"
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "off"
+  auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 1
+  min_machines_running = 0
   processes = ["api"]
 
   [[http_service.checks]]
@@ -42,3 +43,8 @@ primary_region = "sjc"
   memory_mb = 256
   processes = ["engine", "persistence"]
   size = "shared-cpu-1x"
+
+[[restart]]
+  policy = "on-failure"
+  retries = 2
+  processes = ["engine", "persistence"]

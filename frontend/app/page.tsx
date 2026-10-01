@@ -97,9 +97,12 @@ function useReplaySession(queued: QueueResult | undefined) {
     let socket: WebSocket | undefined;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
+    let attempts = 0;
+    const deadline = Date.now() + 90_000;
     const origin = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:8000";
     const socketUrl = `${origin.replace(/^http/, "ws")}/ws/v1/sessions/${queued.run_id}`;
     const connect = () => {
+      attempts += 1;
       setConnectionState("Connecting to workers");
       socket = new WebSocket(socketUrl);
       socket.onopen = () => setConnectionState("Streaming updates");
@@ -107,12 +110,18 @@ function useReplaySession(queued: QueueResult | undefined) {
         const snapshot = JSON.parse(message.data) as SessionSnapshot;
         setSession(snapshot);
         setConnectionState(snapshot.orders[0]?.final_state ? "Replay complete" : "Streaming updates");
+        if (snapshot.orders[0]?.final_state) {
+          closed = true;
+          socket?.close();
+        }
       };
       socket.onerror = () => socket?.close();
       socket.onclose = () => {
-        if (!closed) {
+        if (!closed && attempts < 10 && Date.now() < deadline) {
           setConnectionState("Waiting for workers");
-          retry = setTimeout(connect, 500);
+          retry = setTimeout(connect, 2_000);
+        } else if (!closed) {
+          setConnectionState("Connection unavailable; run again");
         }
       };
     };
@@ -215,9 +224,14 @@ export default function ExecutionLab() {
     };
     void fetchHealth();
     const timer = setInterval(() => void fetchHealth(), 1_000);
+    const deadline = setTimeout(() => {
+      active = false;
+      clearInterval(timer);
+    }, 90_000);
     return () => {
       active = false;
       clearInterval(timer);
+      clearTimeout(deadline);
     };
   }, [queued?.run_id, queued?.partition, replayComplete]);
 

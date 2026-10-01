@@ -66,7 +66,8 @@ def publish_replay(
     events = tuple(event.model_copy(update={"partition": partition}) for event in scenario.events)
     if redis.xlen(stream) + len(events) + 3 > max_queue_depth:
         raise BackpressureError(f"replay would exceed the queue depth limit of {max_queue_depth}")
-    redis.xadd(
+    publishing = redis.pipeline()
+    publishing.xadd(
         stream,
         {
             "message_type": "replay.started.v1",
@@ -80,6 +81,8 @@ def publish_replay(
             ),
         },
     )
+    publishing.expire(stream, 3600)
+    publishing.execute()
     redis.xadd(
         stream,
         {"message_type": "order.command.v1", "payload": json.dumps(scenario.order.model_dump(mode="json"))},
@@ -94,6 +97,7 @@ def publish_replay(
         published_at=now_seconds(),
         published_messages=len(events) + 3,
     )
+    redis.expire(metrics_key(str(scenario.order.run_id), partition), 3600)
     if dispatch:
         redis.xadd(ENGINE_JOB_STREAM, {"run_id": str(scenario.order.run_id), "partition": partition})
     log_event("replay_published", run_id=str(scenario.order.run_id), partition=partition, event_count=len(events))
@@ -111,7 +115,7 @@ def run_engine_worker(redis: Redis, consumer: str) -> None:
                 run_engine(redis, run_id, partition, consumer)
                 redis.xadd(PERSISTENCE_JOB_STREAM, {"run_id": str(run_id), "partition": partition})
                 redis.xack(ENGINE_JOB_STREAM, ENGINE_JOB_GROUP, entry_id)
-                redis.xtrim(ENGINE_JOB_STREAM, maxlen=1000, approximate=True)
+                redis.xdel(ENGINE_JOB_STREAM, entry_id)
 
 
 def run_persistence_worker(redis: Redis, store: DatabaseStore, consumer: str) -> None:
@@ -122,7 +126,7 @@ def run_persistence_worker(redis: Redis, store: DatabaseStore, consumer: str) ->
             for entry_id, message in entries:
                 run_persistence(redis, store, UUID(message["run_id"]), int(message["partition"]), consumer)
                 redis.xack(PERSISTENCE_JOB_STREAM, PERSISTENCE_JOB_GROUP, entry_id)
-                redis.xtrim(PERSISTENCE_JOB_STREAM, maxlen=1000, approximate=True)
+                redis.xdel(PERSISTENCE_JOB_STREAM, entry_id)
 
 
 def run_engine(
@@ -196,6 +200,7 @@ def run_engine(
         engine_processing_ms=(completed_at - started_at) * 1_000,
         processed_events=result.processed_events,
     )
+    expire_replay_state(redis, run_id, partition, engine.order.symbol, engine.order.order_id)
     log_event(
         "engine_completed",
         run_id=str(run_id),

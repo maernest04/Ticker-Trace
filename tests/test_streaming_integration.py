@@ -4,8 +4,10 @@ import subprocess
 import sys
 from dataclasses import replace
 from decimal import Decimal
+from datetime import UTC, datetime, timedelta
 from time import time
 from uuid import UUID, uuid4
+from unittest.mock import Mock
 
 import pytest
 import sqlalchemy as sa
@@ -16,6 +18,7 @@ from market_execution_lab.engine import simulate
 from market_execution_lab.benchmark_service import run_benchmarks
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
 from market_execution_lab.api_service import create_app as create_api_app
+from market_execution_lab import api_service
 from market_execution_lab.operations_service import create_app
 from market_execution_lab.pipeline import (
     BackpressureError,
@@ -30,9 +33,86 @@ from market_execution_lab.pipeline import (
 )
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import RedisReplayRunner, market_state_key, order_state_key, partition_stream_name
+from market_execution_lab.worker_service import create_worker_app
+from market_execution_lab.storage import replay_runs, replay_session_settings
 
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires local Redis and PostgreSQL")
+def test_api_demand_submission_persists_before_returning(monkeypatch):
+    monkeypatch.setenv("FLY_WORKER_LIFECYCLE", "on")
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    workers = Mock()
+    workers.wake.return_value = {"engine": "private-engine", "persistence": "private-persistence"}
+    monkeypatch.setattr(api_service, "FlyWorkers", lambda: workers)
+    with TestClient(create_worker_app("engine", redis, None, lambda: None)) as engine, TestClient(create_worker_app("persistence", redis, store, lambda: None)) as persistence:
+        def execute(hosts, run_id, partition):
+            payload = {"run_id": str(run_id), "partition": partition}
+            assert engine.post("/jobs", json=payload).status_code == 200
+            assert persistence.post("/jobs", json=payload).status_code == 200
+
+        workers.execute.side_effect = execute
+        with TestClient(create_api_app(os.environ["DATABASE_URL"], os.environ["REDIS_URL"])) as client:
+            response = client.post("/api/v1/replays", json={"scenario_name": "complete_market_fill"})
+    assert response.status_code == 202
+    run_id = UUID(response.json()["run_id"])
+    assert store.replay_for_run(run_id)["status"] == "completed"
+    workers.wake.assert_called_once()
+    workers.execute.assert_called_once()
+
+
+@pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires local Redis and PostgreSQL")
+def test_demand_workers_complete_replay_without_global_queue_and_expire_abandoned_state():
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    scenario = _new_run(generated_scenarios()[0])
+    partition = publish_replay(redis, scenario, dispatch=False)
+    stream = partition_stream_name(str(scenario.order.run_id), partition)
+    assert 0 < redis.ttl(stream) <= 3600
+    payload = {"run_id": str(scenario.order.run_id), "partition": partition}
+    with TestClient(create_worker_app("engine", redis, None, lambda: None)) as engine:
+        assert engine.post("/jobs", json=payload).json() == {"status": "completed"}
+    assert 0 < redis.ttl(result_stream_name(str(scenario.order.run_id), partition)) <= 900
+    with TestClient(create_worker_app("persistence", redis, store, lambda: None)) as persistence:
+        assert persistence.post("/jobs", json=payload).json() == {"status": "completed"}
+    assert store.replay_for_run(scenario.order.run_id)["status"] == "completed"
+    assert store.counts_for_run(scenario.order.run_id)["orders"] == 1
+    assert 0 < redis.ttl(stream) <= 900
+    with TestClient(create_api_app(os.environ["DATABASE_URL"], os.environ["REDIS_URL"])) as client:
+        with client.websocket_connect(f"/ws/v1/sessions/{scenario.order.run_id}") as socket:
+            assert socket.receive_json()["replay"]["status"] == "completed"
+            assert socket.receive()["type"] == "websocket.close"
+
+
+@pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires local Redis and PostgreSQL")
+def test_public_retention_is_bounded_and_preserves_live_active_and_benchmark_runs():
+    database = sa.create_engine(os.environ["DATABASE_URL"])
+    store = DatabaseStore(database)
+    name = f"retention-{uuid4()}"
+    now = datetime.now(UTC)
+    ids = [uuid4() for _ in range(1005)]
+    rows = [{"run_id": run_id, "scenario_name": name, "status": "completed", "started_at": now, "completed_at": now - timedelta(seconds=index)} for index, run_id in enumerate(ids)]
+    rows[1001]["completed_at"] = now - timedelta(days=8)
+    rows[1002]["status"] = "running"
+    rows[1004]["scenario_name"] = "benchmark-retention-test"
+    with database.begin() as connection:
+        connection.execute(replay_runs.insert(), rows)
+        connection.execute(replay_session_settings.insert(), [{"run_id": run_id, "mode": "private_live" if index == 1003 else "public_replay", "symbols": ["AAPL"]} for index, run_id in enumerate(ids)])
+    try:
+        assert store.prune_public_replays((name,)) == 2
+        with database.connect() as connection:
+            remaining = set(connection.scalars(sa.select(replay_runs.c.run_id).where(replay_runs.c.run_id.in_(ids))))
+        assert ids[1000] not in remaining
+        assert ids[1001] not in remaining
+        assert set(ids[1002:]).issubset(remaining)
+        assert store.prune_public_replays((name,)) == 0
+    finally:
+        with database.begin() as connection:
+            connection.execute(replay_session_settings.delete().where(replay_session_settings.c.run_id.in_(ids)))
+            connection.execute(replay_runs.delete().where(replay_runs.c.run_id.in_(ids)))
 
 
 @pytest.mark.skipif(

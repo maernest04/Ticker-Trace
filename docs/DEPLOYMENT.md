@@ -14,14 +14,14 @@ The production Compose defaults only to `APP_MODE=public_replay`; it does not pa
 
 ## Public Deployment: Vercel + Fly.io
 
-The browser UI belongs on Vercel. Fly.io runs the API, engine, and persistence worker as three process groups from the same backend image. All public traffic is pinned to the API process; workers have no public HTTP route. PostgreSQL is Fly Managed Postgres, and Redis is a managed Upstash Redis database connected over TLS.
+The browser UI belongs on Vercel. Fly.io runs the API, engine, and persistence worker as three process groups from the same backend image. All public traffic is pinned to the API process; workers use private HTTP endpoints only. The portfolio deployment uses Supabase PostgreSQL and Upstash Redis over TLS.
 
 This layout is intentionally replay-only. It does not deploy the Alpaca ingestion service or add any Alpaca credential to Fly or Vercel.
 
 ### One-Time Provider Setup
 
 1. Install `flyctl`, authenticate with `fly auth login`, and replace the placeholder `app` name in [fly.toml](../fly.toml) with a globally unique Fly application name.
-2. Create a Fly Managed Postgres cluster in `sjc`, then attach it to the app. Fly provides the connection string as `DATABASE_URL`; the application accepts both Fly's standard `postgresql://` URL and the local SQLAlchemy URL.
+2. Set a Supabase PostgreSQL connection string as `DATABASE_URL`. The application accepts `postgresql://` and SQLAlchemy URLs. Use a connection endpoint reachable from Fly and require TLS.
 3. Create an Upstash Redis database in the same region and set its TLS connection string as Fly's `REDIS_URL` secret.
 4. Set Fly's public browser origin before deployment:
 
@@ -29,14 +29,23 @@ This layout is intentionally replay-only. It does not deploy the Alpaca ingestio
 fly secrets set PUBLIC_ALLOWED_ORIGINS=https://your-vercel-project.vercel.app
 ```
 
-5. Deploy from the repository root, then create one machine for each worker process group:
+5. Create an app-scoped Fly deploy token with a finite lifetime. Treat it as a server-side secret; never add it to Vercel or paste it into chat. Stage it before deploying so the new API can start:
 
 ```bash
-fly deploy
-fly scale count api=1 engine=1 persistence=1
+fly tokens create deploy -a ticker-trace --expiry 2160h
+fly secrets set --stage FLY_WORKER_TOKEN="<token-from-the-previous-command>" -a ticker-trace
 ```
 
-The deployment runs `alembic upgrade head` as Fly's release command before replacing application machines. The initial deployment keeps one API machine warm; the free-tier lifecycle phase below changes this to scale-to-zero behavior after the first end-to-end deployment is verified.
+The app-scoped deploy token can manage this application's resources, not just start workers. Rotate it before expiry; an expired token fails new submissions closed. `FLY_APP_NAME` is supplied by Fly at runtime. The new `FLY_WORKER_LIFECYCLE=on` setting in `fly.toml` enables demand dispatch; local Compose retains queue dispatch.
+
+6. Deploy from the repository root without automatic spare machines, then keep exactly one existing machine per process group:
+
+```bash
+fly deploy -a ticker-trace --ha=false
+fly scale count api=1 engine=1 persistence=1 -a ticker-trace
+```
+
+The deployment runs `alembic upgrade head` before replacing application machines. Workers exit cleanly after 60 idle seconds; the on-failure restart policy does not restart a successful idle exit. Fly Proxy stops the API when idle with `min_machines_running=0`. Do not scale worker counts to zero: that removes machines, while demand startup needs the existing stopped machines. Redeploy Vercel to apply completed-session WebSocket closure and bounded retries.
 
 ### Vercel Setup
 
@@ -64,48 +73,52 @@ The configuration endpoint must return `{"mode":"public_replay"}`. Submit one ge
 
 The target idle state is that Vercel serves only static frontend assets, Fly has no running API or worker machine, Redis receives no application commands, and Supabase receives no keepalive traffic. A user opening the dashboard is the event that wakes the public execution path.
 
-This is a planned lifecycle mode, not the behavior of the initial deployment. The first deployment keeps the API and workers available so the data path can be validated before adding wake-up orchestration.
-
-The first implementation slice now uses a Redis-free Fly health endpoint, 30-second worker blocking reads, bounded global job streams, and a 15-minute TTL for completed replay state. It reduces idle usage but does not yet make the continuously deployed workers fully offline.
+The lifecycle implementation is locally tested. Production acceptance requires staging the token, deploying the updated backend and frontend, and observing actual provider counters. Fly autostop is traffic-based, not an immediate guarantee; external uptime monitors can keep the API awake. Do not schedule `/ready` or dashboard API polling.
 
 ### Idle State
 
 - Vercel remains the static delivery layer; it does not connect directly to Redis or PostgreSQL.
 - Fly API machines use scale-to-zero settings and a health endpoint that does not call Redis or PostgreSQL.
-- Engine and persistence worker counts are zero when no replay lease is active; they must not poll Redis while stopped.
+- One machine remains provisioned for each worker, but none is running after the idle grace period. Worker health and idle checks do not access Redis or PostgreSQL.
 - Upstash receives no worker polling, rate-limit, cache, or stream commands while idle.
 - Supabase receives no background query, WebSocket, or keepalive traffic. Its Free project may pause after a week of low activity and can be resumed from the dashboard.
 
 ### Wake and Sleep Flow
 
 1. The frontend requests a replay session from the API.
-2. The API obtains a short-lived replay lease, starts the worker process groups through the selected Fly lifecycle mechanism, and waits for worker readiness.
-3. The API publishes the replay only after the lease has an active engine and persistence owner.
-4. The WebSocket reports progress while the replay is active.
-5. After completion and a short grace period, the controller trims temporary Redis state, releases the lease, and scales workers back to zero.
-6. The API returns to its scale-to-zero state after the configured idle window.
+2. Configuration/scenario reads need no Redis or database access and do not wake workers. A replay submission reserves a shared monthly allowance, starts the two existing workers, and checks readiness with bounded retries.
+3. The API publishes an isolated replay stream only after both workers are ready, then calls engine `/jobs` followed by persistence `/jobs` over Fly's private network. There is no idle Redis job polling and no Redis lease heartbeat.
+4. The submission returns after persistence finishes. The WebSocket sends the completed snapshot and closes; the UI animates the recorded events locally. This low-cost public mode does not stream intermediate worker progress. Local queue mode still supports asynchronous progress.
+5. Each worker accepts at most four concurrent jobs, rejects duplicate active run IDs, and exits after 60 seconds with no active job. Redis temporary state expires; retention cleanup runs only on successful demand, not on a timer.
+6. Fly Proxy subsequently stops the idle API. Browser reconnect attempts and incomplete server sessions are bounded. A disconnect does not cancel accepted worker work; dependency failures may leave an abandoned replay whose source expires after one hour.
 
 ### Free-Tier Guardrails
 
 - Upstash command, bandwidth, and data-size usage is sampled before and after lifecycle tests.
 - Redis streams, dead-letter streams, metrics hashes, market state, and order state receive explicit retention or trimming rules.
-- PostgreSQL replay history has a documented retention policy and a bounded cleanup job; durable benchmark records are retained separately.
+- Completed generated public replay history is retained for seven days and at most the newest 1,000 runs. Cleanup deletes at most 100 eligible runs per successful submission, including their associated events, orders, fills, transitions, and settings. Private/live runs, active runs, watchlists, and non-generated benchmark scenarios are excluded. Cleanup is irreversible and occurs on demand, so expired rows can remain while the app is idle.
+- A shared Redis counter admits at most 1,000 replay attempts per UTC calendar month, including failed starts. This is a conservative demo envelope, not a measured provider-quota guarantee. Redis outages reject submissions; quota exhaustion returns HTTP 429.
 - Public replay creation and concurrent-session limits remain enforced server-side.
 - No provider auto-upgrade or payment method is enabled solely to handle an unexpected quota spike.
 - A lifecycle failure must fail closed by rejecting new replay work, not by creating an unbounded polling loop.
 
 ### Verification
 
-- Leave the dashboard unopened for 24 hours and confirm no Redis command growth attributable to workers, no new replay rows, and zero worker machines.
+- Record Upstash command/data/bandwidth counters, Supabase database-size/egress counters, and Fly machine states before testing. Do not automate polling against the application.
+- Leave the dashboard unopened for 24 hours and confirm no application Redis commands, no new replay rows, and all three machines stopped. Redis TTL eviction is expected and may decrease data size without application commands.
 - Open the dashboard and confirm the API wakes, workers start once, and one replay completes.
 - Repeat five concurrent replay requests and confirm only the configured worker count starts.
 - Leave the dashboard idle again and confirm workers stop after the grace period.
 - Run the same test with Redis unavailable and confirm the API reports a bounded dependency error without retry storms.
+- Record the same provider counters after one replay and five concurrent submissions. Use the measured command/egress delta and remaining monthly quota to lower the 1,000-attempt allowance if needed. Provider dashboards are the source of truth; no management credentials are required by the application.
+- Check Fly billing separately. Stopped machines avoid running compute, but storage, network traffic, or other account resources can still cost money; this is not a guaranteed free deployment.
+
+Fly lifecycle configuration follows the [Fly configuration reference](https://docs.fly.io/reference/configuration). Supabase pausing/resuming remains operator-managed; the application must not send keepalives to prevent a free project from pausing.
 
 ## Deployment Goals
 
 - Provide a publicly accessible replay UI and API demonstration.
-- Keep long-running ingestion and worker services continuously available.
+- Wake public replay workers on demand; keep any continuous live ingestion in a separate private deployment.
 - Protect market-data credentials and other secrets.
 - Keep private live data isolated from the public deployment.
 - Support repeatable deployments and safe database migrations.

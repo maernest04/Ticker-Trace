@@ -16,12 +16,14 @@ import uvicorn
 
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
 from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
+from market_execution_lab.fly_workers import FlyWorkers
 from market_execution_lab.models import OrderCommand, OrderSide, OrderType, QuoteEvent, TradeEvent
-from market_execution_lab.observability import configure_logging, pipeline_metrics, request_id_context
+from market_execution_lab.observability import configure_logging, log_event, pipeline_metrics, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
 from market_execution_lab.pipeline import publish_replay
 from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 from market_execution_lab.streaming import market_state_key, partition_stream_name
+from redis.exceptions import RedisError
 
 
 class SymbolResponse(BaseModel):
@@ -218,9 +220,34 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
         allow_methods=["GET", "POST", "PUT"],
         allow_headers=["content-type", "x-request-id"],
     )
-    store = DatabaseStore(sa.create_engine(sqlalchemy_url(database_url)))
+    store = DatabaseStore(sa.create_engine(sqlalchemy_url(database_url), connect_args={"connect_timeout": 10}))
     redis = app.state.redis
     scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
+    workers = FlyWorkers() if os.getenv("FLY_WORKER_LIFECYCLE") == "on" else None
+
+    def submit(queued: ScenarioFixture) -> int:
+        try:
+            if workers:
+                bucket = datetime.now(UTC).strftime("%Y-%m")
+                admitted = redis.eval(
+                    "local n = tonumber(redis.call('GET', KEYS[1]) or '0'); "
+                    "if n >= tonumber(ARGV[1]) then return 0 end; "
+                    "redis.call('INCR', KEYS[1]); redis.call('EXPIRE', KEYS[1], 2764800); return 1",
+                    1, f"public-replay-budget:{bucket}", 1000,
+                )
+                if not admitted:
+                    raise HTTPException(429, "monthly demo replay allowance reached")
+            hosts = workers.wake() if workers else None
+            partition = publish_replay(redis, queued, mode=mode, dispatch=workers is None)
+            if workers:
+                workers.execute(hosts, queued.order.run_id, partition)
+                try:
+                    store.prune_public_replays(tuple(scenarios))
+                except sa.exc.SQLAlchemyError:
+                    log_event("public_replay_cleanup_failed", run_id=str(queued.order.run_id))
+            return partition
+        except (RuntimeError, OSError, RedisError) as error:
+            raise HTTPException(503, "execution workers unavailable; try again shortly") from error
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, error: HTTPException) -> JSONResponse:
@@ -309,7 +336,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
         scenario = _scenario_for_name(scenarios, request.scenario_name)
         order = scenario.order.model_copy(update={"run_id": uuid4(), "order_id": uuid4()})
         queued = _new_run(scenario, order)
-        partition = publish_replay(redis, queued, mode=mode)
+        partition = submit(queued)
         return QueuedReplayResponse(
             run_id=queued.order.run_id,
             order_id=queued.order.order_id,
@@ -334,7 +361,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
             latency_ms=request.latency_ms,
         )
         queued = _new_run(scenario, order)
-        partition = publish_replay(redis, queued, mode=mode)
+        partition = submit(queued)
         return QueuedReplayResponse(
             run_id=queued.order.run_id,
             order_id=queued.order.order_id,
@@ -368,7 +395,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
             await websocket.close(code=1008)
             return
         last_payload = None
-        while True:
+        for _ in range(60):
             latest_replay = ReplayResponse.model_validate(store.replay_for_run(run_id))
             latest_orders = [OrderResponse.model_validate(order) for order in store.orders_for_run(run_id)]
             events = [_event_response(event) for event in store.events_for_run(run_id, 200)]
@@ -387,12 +414,16 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
             if payload != last_payload:
                 await websocket.send_json(payload)
                 last_payload = payload
+            if latest_replay.status == "completed":
+                await websocket.close(code=1000)
+                return
             try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=0.25)
+                await asyncio.wait_for(websocket.receive_text(), timeout=1)
             except TimeoutError:
                 pass
             except WebSocketDisconnect:
                 return
+        await websocket.close(code=1013)
 
     return app
 
