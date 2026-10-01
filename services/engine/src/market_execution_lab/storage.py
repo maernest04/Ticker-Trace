@@ -106,6 +106,14 @@ replay_session_settings = sa.Table(
 )
 
 
+def sqlalchemy_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return f"postgresql+psycopg://{url.removeprefix('postgres://')}"
+    if url.startswith("postgresql://"):
+        return f"postgresql+psycopg://{url.removeprefix('postgresql://')}"
+    return url
+
+
 class DatabaseStore:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine

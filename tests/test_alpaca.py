@@ -5,6 +5,7 @@ import pytest
 
 from market_execution_lab.alpaca import AlpacaSettings, normalize_alpaca_message, require_private_live_mode, subscription_actions
 from market_execution_lab.models import QuoteEvent, TradeEvent
+from market_execution_lab.storage import sqlalchemy_url
 
 
 RUN_ID = UUID("22222222-2222-2222-2222-222222222222")
@@ -64,3 +65,8 @@ def test_subscription_actions_update_an_existing_connection() -> None:
         ("subscribe", ["NVDA"]),
         ("unsubscribe", ["AAPL"]),
     )
+
+
+def test_normalizes_standard_postgres_urls_for_psycopg() -> None:
+    assert sqlalchemy_url("postgres://user:password@database.example/app") == "postgresql+psycopg://user:password@database.example/app"
+    assert sqlalchemy_url("postgresql://user:password@database.example/app") == "postgresql+psycopg://user:password@database.example/app"

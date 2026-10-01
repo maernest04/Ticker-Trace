@@ -199,9 +199,11 @@ Phase 1 is complete.
 
 ### 6B — Public Replay Deployment
 
-- [ ] Provision Vercel frontend, persistent API/worker containers, managed Redis, and managed PostgreSQL.
-- [ ] Disable restricted live data in public mode.
-- [ ] Verify that public replay fixtures have redistribution-safe provenance.
+- [x] Add Fly/Vercel configuration for persistent API and worker process groups.
+- [x] Disable restricted live data in public mode.
+- [x] Verify that public replay fixtures are deterministic generated fixtures with no vendor data.
+- [ ] Provision Vercel frontend, Fly API/worker containers, managed Redis, and managed PostgreSQL.
+- [ ] Complete the deployed-browser smoke test.
 
 **Verification:** A clean browser completes the public replay workflow and public services cannot start live ingestion.
 

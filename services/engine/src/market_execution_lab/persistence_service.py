@@ -7,7 +7,7 @@ from redis import Redis
 
 from market_execution_lab.pipeline import MAX_DELIVERIES, RECOVERY_IDLE_MS, run_persistence, run_persistence_worker
 from market_execution_lab.observability import configure_logging
-from market_execution_lab.storage import DatabaseStore
+from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     redis = Redis.from_url(arguments.redis_url, decode_responses=True)
-    store = DatabaseStore(sa.create_engine(arguments.database_url))
+    store = DatabaseStore(sa.create_engine(sqlalchemy_url(arguments.database_url)))
 
     if arguments.forever:
         run_persistence_worker(redis, store, arguments.consumer)

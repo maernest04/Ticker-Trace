@@ -442,6 +442,25 @@ def test_public_mode_rejects_live_alpaca_credentials(monkeypatch: pytest.MonkeyP
         create_api_app("postgresql+psycopg://unused", "redis://localhost:6379/0")
 
 
+def test_public_api_allows_only_configured_browser_origins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_MODE", "public_replay")
+    monkeypatch.setenv("PUBLIC_ALLOWED_ORIGINS", "https://market-execution-lab.vercel.app")
+    client = TestClient(create_api_app("postgresql+psycopg://unused", "redis://localhost:6379/0"))
+
+    permitted = client.options(
+        "/api/v1/scenarios",
+        headers={"origin": "https://market-execution-lab.vercel.app", "access-control-request-method": "GET"},
+    )
+    rejected = client.options(
+        "/api/v1/scenarios",
+        headers={"origin": "https://untrusted.example", "access-control-request-method": "GET"},
+    )
+
+    assert permitted.status_code == 200
+    assert permitted.headers["access-control-allow-origin"] == "https://market-execution-lab.vercel.app"
+    assert rejected.status_code == 400
+
+
 def _run_service(environment: dict[str, str], module: str, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", module, *arguments],

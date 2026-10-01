@@ -38,6 +38,7 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tickertrace}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-tickertrace}
       REDIS_URL: redis://redis:6379/0
       PUBLIC_REQUEST_LIMIT: ${PUBLIC_REQUEST_LIMIT:-60}
+      PUBLIC_ALLOWED_ORIGINS: ${PUBLIC_ALLOWED_ORIGINS:-http://localhost:3000}
     ports:
       - "8000:8000"
     depends_on:

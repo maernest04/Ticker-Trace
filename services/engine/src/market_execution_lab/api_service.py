@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 import sqlalchemy as sa
@@ -19,7 +20,7 @@ from market_execution_lab.models import OrderCommand, OrderSide, OrderType, Quot
 from market_execution_lab.observability import configure_logging, pipeline_metrics, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
 from market_execution_lab.pipeline import publish_replay
-from market_execution_lab.storage import DatabaseStore
+from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 from market_execution_lab.streaming import market_state_key, partition_stream_name
 
 
@@ -211,7 +212,13 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     if request_limit is None and mode == "public_replay":
         request_limit = int(os.getenv("PUBLIC_REQUEST_LIMIT", "60"))
     app = create_operations_app(redis_url, request_limit)
-    store = DatabaseStore(sa.create_engine(database_url))
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin.strip() for origin in os.getenv("PUBLIC_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
+        allow_methods=["GET", "POST", "PUT"],
+        allow_headers=["content-type", "x-request-id"],
+    )
+    store = DatabaseStore(sa.create_engine(sqlalchemy_url(database_url)))
     redis = app.state.redis
     scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
 
