@@ -39,6 +39,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       PUBLIC_REQUEST_LIMIT: ${PUBLIC_REQUEST_LIMIT:-60}
       PUBLIC_ALLOWED_ORIGINS: ${PUBLIC_ALLOWED_ORIGINS:-http://localhost:3000}
+      REPLAY_STATE_TTL_SECONDS: ${REPLAY_STATE_TTL_SECONDS:-900}
+      WORKER_POLL_BLOCK_MS: ${WORKER_POLL_BLOCK_MS:-30000}
     ports:
       - "8000:8000"
     depends_on:
@@ -58,6 +60,7 @@ services:
     environment:
       APP_MODE: public_replay
       REDIS_URL: redis://redis:6379/0
+      WORKER_POLL_BLOCK_MS: ${WORKER_POLL_BLOCK_MS:-30000}
     depends_on:
       redis:
         condition: service_healthy
@@ -71,6 +74,8 @@ services:
       APP_MODE: public_replay
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tickertrace}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-tickertrace}
       REDIS_URL: redis://redis:6379/0
+      REPLAY_STATE_TTL_SECONDS: ${REPLAY_STATE_TTL_SECONDS:-900}
+      WORKER_POLL_BLOCK_MS: ${WORKER_POLL_BLOCK_MS:-30000}
     depends_on:
       redis:
         condition: service_healthy

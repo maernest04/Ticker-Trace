@@ -1,4 +1,5 @@
 import json
+import os
 import zlib
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from redis.exceptions import ResponseError
 from market_execution_lab.engine import ExecutionEngine, ExecutionMetrics, ExecutionResult, simulate
 from market_execution_lab.fixtures import ScenarioFixture
 from market_execution_lab.models import Fill, MarketEvent, OrderCommand, OrderState, OrderStateChange
-from market_execution_lab.observability import log_event, now_seconds, record_metrics
+from market_execution_lab.observability import log_event, metrics_key, now_seconds, record_metrics
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import (
     cache_market_state,
@@ -33,6 +34,8 @@ ENGINE_JOB_STREAM = "execution.engine.jobs"
 PERSISTENCE_JOB_STREAM = "execution.persistence.jobs"
 ENGINE_JOB_GROUP = "engine-workers"
 PERSISTENCE_JOB_GROUP = "persistence-workers"
+WORKER_POLL_BLOCK_MS = int(os.getenv("WORKER_POLL_BLOCK_MS", "30000"))
+REPLAY_STATE_TTL_SECONDS = int(os.getenv("REPLAY_STATE_TTL_SECONDS", "900"))
 
 
 class BackpressureError(RuntimeError):
@@ -100,7 +103,7 @@ def publish_replay(
 def run_engine_worker(redis: Redis, consumer: str) -> None:
     _ensure_group(redis, ENGINE_JOB_STREAM, ENGINE_JOB_GROUP)
     while True:
-        response = redis.xreadgroup(ENGINE_JOB_GROUP, consumer, {ENGINE_JOB_STREAM: ">"}, count=1, block=1_000)
+        response = redis.xreadgroup(ENGINE_JOB_GROUP, consumer, {ENGINE_JOB_STREAM: ">"}, count=1, block=WORKER_POLL_BLOCK_MS)
         for _, entries in response:
             for entry_id, message in entries:
                 run_id = UUID(message["run_id"])
@@ -108,16 +111,18 @@ def run_engine_worker(redis: Redis, consumer: str) -> None:
                 run_engine(redis, run_id, partition, consumer)
                 redis.xadd(PERSISTENCE_JOB_STREAM, {"run_id": str(run_id), "partition": partition})
                 redis.xack(ENGINE_JOB_STREAM, ENGINE_JOB_GROUP, entry_id)
+                redis.xtrim(ENGINE_JOB_STREAM, maxlen=1000, approximate=True)
 
 
 def run_persistence_worker(redis: Redis, store: DatabaseStore, consumer: str) -> None:
     _ensure_group(redis, PERSISTENCE_JOB_STREAM, PERSISTENCE_JOB_GROUP)
     while True:
-        response = redis.xreadgroup(PERSISTENCE_JOB_GROUP, consumer, {PERSISTENCE_JOB_STREAM: ">"}, count=1, block=1_000)
+        response = redis.xreadgroup(PERSISTENCE_JOB_GROUP, consumer, {PERSISTENCE_JOB_STREAM: ">"}, count=1, block=WORKER_POLL_BLOCK_MS)
         for _, entries in response:
             for entry_id, message in entries:
                 run_persistence(redis, store, UUID(message["run_id"]), int(message["partition"]), consumer)
                 redis.xack(PERSISTENCE_JOB_STREAM, PERSISTENCE_JOB_GROUP, entry_id)
+                redis.xtrim(PERSISTENCE_JOB_STREAM, maxlen=1000, approximate=True)
 
 
 def run_engine(
@@ -244,12 +249,26 @@ def run_persistence(
                 persistence_completed_at=completed_at,
                 persistence_processing_ms=(completed_at - started_at) * 1_000,
             )
+            expire_replay_state(redis, run_id, partition, order.symbol, order.order_id)
             log_event("persistence_completed", run_id=str(run_id), partition=partition)
             return
         except (KeyError, TypeError, ValueError) as error:
             _dead_letter(redis, run_id, partition, results, PERSISTENCE_GROUP, entry_id, message, str(error))
             redis.xack(results, PERSISTENCE_GROUP, entry_id)
     raise RuntimeError("result stream did not include an execution result")
+
+
+def expire_replay_state(redis: Redis, run_id: UUID, partition: int, symbol: str, order_id: UUID) -> None:
+    keys = (
+        partition_stream_name(str(run_id), partition),
+        result_stream_name(str(run_id), partition),
+        dead_letter_stream_name(str(run_id), partition),
+        metrics_key(str(run_id), partition),
+        market_state_key(str(run_id), symbol),
+        order_state_key(str(run_id), str(order_id)),
+    )
+    for key in keys:
+        redis.expire(key, REPLAY_STATE_TTL_SECONDS)
 
 
 def _ensure_group(redis: Redis, stream: str, group: str) -> None:

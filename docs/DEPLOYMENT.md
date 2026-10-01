@@ -66,6 +66,8 @@ The target idle state is that Vercel serves only static frontend assets, Fly has
 
 This is a planned lifecycle mode, not the behavior of the initial deployment. The first deployment keeps the API and workers available so the data path can be validated before adding wake-up orchestration.
 
+The first implementation slice now uses a Redis-free Fly health endpoint, 30-second worker blocking reads, bounded global job streams, and a 15-minute TTL for completed replay state. It reduces idle usage but does not yet make the continuously deployed workers fully offline.
+
 ### Idle State
 
 - Vercel remains the static delivery layer; it does not connect directly to Redis or PostgreSQL.

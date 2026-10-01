@@ -10,6 +10,8 @@ primary_region = "sjc"
 [env]
   APP_MODE = "public_replay"
   PUBLIC_REQUEST_LIMIT = "60"
+  REPLAY_STATE_TTL_SECONDS = "900"
+  WORKER_POLL_BLOCK_MS = "30000"
 
 [processes]
   api = "market-execution-api"
@@ -28,7 +30,7 @@ primary_region = "sjc"
     grace_period = "15s"
     interval = "30s"
     method = "GET"
-    path = "/ready"
+    path = "/health"
     timeout = "5s"
 
 [[vm]]

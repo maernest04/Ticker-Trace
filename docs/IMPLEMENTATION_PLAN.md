@@ -209,8 +209,11 @@ Phase 1 is complete.
 
 ### 6C — Free-Tier Lifecycle Safety
 
-- [ ] Define the idle state for Vercel, Fly, Redis, and Supabase with no background keepalive traffic.
-- [ ] Configure Fly API scale-to-zero behavior and a health endpoint that does not touch Redis or PostgreSQL.
+- [x] Define the idle state for Vercel, Fly, Redis, and Supabase with no background keepalive traffic.
+- [x] Add a Fly health endpoint that does not touch Redis or PostgreSQL.
+- [x] Increase worker blocking intervals and trim global job streams to reduce idle Redis commands and unbounded queue history.
+- [x] Add a 15-minute expiration policy for completed replay streams, cached state, dead letters, and metrics.
+- [ ] Configure Fly API scale-to-zero behavior after demand-driven worker startup is available.
 - [ ] Add demand-driven worker lifecycle control so engine and persistence workers run only while a replay lease is active.
 - [ ] Ensure worker processes do not poll Redis while stopped or when no replay lease exists.
 - [ ] Add replay leases, startup readiness, duplicate-start protection, and bounded idle shutdown.

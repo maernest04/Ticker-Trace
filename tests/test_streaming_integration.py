@@ -442,6 +442,16 @@ def test_public_mode_rejects_live_alpaca_credentials(monkeypatch: pytest.MonkeyP
         create_api_app("postgresql+psycopg://unused", "redis://localhost:6379/0")
 
 
+def test_health_endpoint_does_not_require_redis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_MODE", "public_replay")
+    client = TestClient(create_api_app("postgresql+psycopg://unused", "redis://unavailable:6379/0"))
+
+    health = client.get("/health")
+
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+
+
 def test_public_api_allows_only_configured_browser_origins(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_MODE", "public_replay")
     monkeypatch.setenv("PUBLIC_ALLOWED_ORIGINS", "https://market-execution-lab.vercel.app")
