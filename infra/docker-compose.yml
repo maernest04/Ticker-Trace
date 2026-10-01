@@ -1,8 +1,6 @@
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -12,13 +10,89 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: tickertrace
-      POSTGRES_USER: tickertrace
-      POSTGRES_PASSWORD: tickertrace
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-tickertrace}
+      POSTGRES_USER: ${POSTGRES_USER:-tickertrace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tickertrace -d tickertrace"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tickertrace} -d ${POSTGRES_DB:-tickertrace}"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  migrate:
+    build: ..
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tickertrace}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-tickertrace}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ..
+    command: market-execution-api
+    environment:
+      APP_MODE: public_replay
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tickertrace}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-tickertrace}
+      REDIS_URL: redis://redis:6379/0
+      PUBLIC_REQUEST_LIMIT: ${PUBLIC_REQUEST_LIMIT:-60}
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8000/ready')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  engine:
+    build: ..
+    command: market-execution-engine --forever
+    environment:
+      APP_MODE: public_replay
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  persistence:
+    build: ..
+    command: market-execution-persistence --forever
+    environment:
+      APP_MODE: public_replay
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tickertrace}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}@postgres:5432/${POSTGRES_DB:-tickertrace}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        API_URL: http://api:8000
+    environment:
+      NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(response => { if (!response.ok) process.exit(1) })"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:

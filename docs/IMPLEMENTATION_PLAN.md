@@ -190,10 +190,10 @@ Phase 1 is complete.
 
 ### 6A — Containerized Application
 
-- [ ] Build deployable containers.
-- [ ] Configure secrets and environment-specific settings.
-- [ ] Run database migrations.
-- [ ] Add deployment health checks.
+- [x] Build deployable containers.
+- [x] Configure secrets and environment-specific settings.
+- [x] Run database migrations.
+- [x] Add deployment health checks.
 
 **Verification:** The complete replay stack starts locally with production-like configuration and passes a smoke test.
 

@@ -1,5 +1,17 @@
 # Deployment Plan
 
+## Local Container Stack
+
+Copy `infra/.env.production.example` to `infra/.env`, replace `POSTGRES_PASSWORD`, then run:
+
+```bash
+docker compose --env-file infra/.env -f infra/docker-compose.yml up --build --wait
+```
+
+The `migrate` service applies Alembic migrations before the API, engine, and persistence workers start. The local public replay stack exposes the frontend at `http://localhost:3000` and the API at `http://localhost:8000`.
+
+The production Compose defaults only to `APP_MODE=public_replay`; it does not pass Alpaca credentials or start ingestion.
+
 ## Deployment Goals
 
 - Provide a publicly accessible replay UI and API demonstration.
