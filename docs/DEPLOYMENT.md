@@ -36,7 +36,7 @@ fly deploy
 fly scale count api=1 engine=1 persistence=1
 ```
 
-The deployment runs `alembic upgrade head` as Fly's release command before replacing application machines. The API remains warm so a replay session WebSocket does not start from a cold machine.
+The deployment runs `alembic upgrade head` as Fly's release command before replacing application machines. The initial deployment keeps one API machine warm; the free-tier lifecycle phase below changes this to scale-to-zero behavior after the first end-to-end deployment is verified.
 
 ### Vercel Setup
 
@@ -59,6 +59,46 @@ curl -fsS https://your-fly-app.fly.dev/api/v1/configuration
 ```
 
 The configuration endpoint must return `{"mode":"public_replay"}`. Submit one generated replay through the Vercel UI, confirm its WebSocket session completes, then verify the resulting order and events through the API. No public Fly or Vercel environment variable may contain `ALPACA_API_KEY` or `ALPACA_API_SECRET`.
+
+## Free-Tier Lifecycle Plan
+
+The target idle state is that Vercel serves only static frontend assets, Fly has no running API or worker machine, Redis receives no application commands, and Supabase receives no keepalive traffic. A user opening the dashboard is the event that wakes the public execution path.
+
+This is a planned lifecycle mode, not the behavior of the initial deployment. The first deployment keeps the API and workers available so the data path can be validated before adding wake-up orchestration.
+
+### Idle State
+
+- Vercel remains the static delivery layer; it does not connect directly to Redis or PostgreSQL.
+- Fly API machines use scale-to-zero settings and a health endpoint that does not call Redis or PostgreSQL.
+- Engine and persistence worker counts are zero when no replay lease is active; they must not poll Redis while stopped.
+- Upstash receives no worker polling, rate-limit, cache, or stream commands while idle.
+- Supabase receives no background query, WebSocket, or keepalive traffic. Its Free project may pause after a week of low activity and can be resumed from the dashboard.
+
+### Wake and Sleep Flow
+
+1. The frontend requests a replay session from the API.
+2. The API obtains a short-lived replay lease, starts the worker process groups through the selected Fly lifecycle mechanism, and waits for worker readiness.
+3. The API publishes the replay only after the lease has an active engine and persistence owner.
+4. The WebSocket reports progress while the replay is active.
+5. After completion and a short grace period, the controller trims temporary Redis state, releases the lease, and scales workers back to zero.
+6. The API returns to its scale-to-zero state after the configured idle window.
+
+### Free-Tier Guardrails
+
+- Upstash command, bandwidth, and data-size usage is sampled before and after lifecycle tests.
+- Redis streams, dead-letter streams, metrics hashes, market state, and order state receive explicit retention or trimming rules.
+- PostgreSQL replay history has a documented retention policy and a bounded cleanup job; durable benchmark records are retained separately.
+- Public replay creation and concurrent-session limits remain enforced server-side.
+- No provider auto-upgrade or payment method is enabled solely to handle an unexpected quota spike.
+- A lifecycle failure must fail closed by rejecting new replay work, not by creating an unbounded polling loop.
+
+### Verification
+
+- Leave the dashboard unopened for 24 hours and confirm no Redis command growth attributable to workers, no new replay rows, and zero worker machines.
+- Open the dashboard and confirm the API wakes, workers start once, and one replay completes.
+- Repeat five concurrent replay requests and confirm only the configured worker count starts.
+- Leave the dashboard idle again and confirm workers stop after the grace period.
+- Run the same test with Redis unavailable and confirm the API reports a bounded dependency error without retry storms.
 
 ## Deployment Goals
 

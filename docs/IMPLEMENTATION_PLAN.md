@@ -207,7 +207,20 @@ Phase 1 is complete.
 
 **Verification:** A clean browser completes the public replay workflow and public services cannot start live ingestion.
 
-### 6C — Operational Validation
+### 6C — Free-Tier Lifecycle Safety
+
+- [ ] Define the idle state for Vercel, Fly, Redis, and Supabase with no background keepalive traffic.
+- [ ] Configure Fly API scale-to-zero behavior and a health endpoint that does not touch Redis or PostgreSQL.
+- [ ] Add demand-driven worker lifecycle control so engine and persistence workers run only while a replay lease is active.
+- [ ] Ensure worker processes do not poll Redis while stopped or when no replay lease exists.
+- [ ] Add replay leases, startup readiness, duplicate-start protection, and bounded idle shutdown.
+- [ ] Add Redis stream/key trimming and PostgreSQL replay retention based on measured storage growth.
+- [ ] Add provider usage checks for Redis commands, Redis data size, Redis bandwidth, database size, and database egress.
+- [ ] Add failure tests for worker startup, worker shutdown, Redis outage, and abandoned replay leases.
+
+**Verification:** After 24 hours with no dashboard activity, no worker machines are running, Redis receives no application commands, PostgreSQL receives no keepalive traffic, and the providers remain within free-tier quotas. Opening the dashboard starts one bounded replay path and returns the system to idle after completion.
+
+### 6D — Operational Validation
 
 - [ ] Document rollback and recovery procedures.
 - [ ] Configure logs, metrics, and uptime/health checks.
