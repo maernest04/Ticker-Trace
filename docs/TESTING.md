@@ -14,6 +14,23 @@ RUN_STREAMING_INTEGRATION=1 APP_MODE=public_replay REDIS_URL=redis://127.0.0.1:5
 
 The continuous acceptance test offers generated input independently of consumers and samples backlog during production. It is not the former drain-after-each-batch test. External market, deployed concurrency, rollback, and 24-hour provider-counter checks remain operator acceptance tasks in `PRE_PHASE_7.md` and `DEPLOYMENT.md`.
 
+## Current Local-First Acceptance
+
+Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). These tests are planned, not coverage added by this documentation update.
+
+- [ ] Local A: immediate restart waits safely for an unexpired old lease and resumes without manual retry; a competing healthy owner is never displaced.
+- [ ] Local A: partial ownership acquisition, graceful/abrupt termination, slow reconstruction, and lost ownership preserve exclusivity and idempotent fills.
+- [ ] Local A: execution and persistence replacements recover independently; repeat the actual provider-linked browser test after the fix.
+- [ ] Local B: ingestion restart restores the same recoverable session and subscriptions; laptop/Docker suspension does not orphan workers on the wrong session.
+- [ ] Local B: forced rollover closes partial orders explicitly, drains source/results, and activates exactly one replacement session.
+- [ ] Local B: retries at each rollover stage are safe; bounded cleanup preserves active/pending work, retained triggering quotes, and unrelated records.
+- [ ] Local C: run the full suite and frontend production build, measure a nonzero real feed peak, then offer twice that rate for at least 600 seconds using isolated local generated load.
+- [ ] Local C: record workload/environment details, screenshot permissions, and verified shutdown behavior before publishing final claims.
+
+October 2 manual actual-feed smoke: two five-share AAPL orders filled at 332.89 and 332.94; SQL verified subsequent-quote linkage and one fill row per order. Immediate engine restart failed because the old lease still existed. Retrying after expiry restored fresh quotes and subsequent execution. This is manually assisted recovery, not a passed immediate automatic recovery test or a mid-fill crash test. Full identifiers and scope are in [PRE_PHASE_7.md](PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
+
+The previously recorded 93 passing tests and Next.js build predate that operational test. No application code or tests changed in this documentation update. Cloud concurrency, rollback, and 24-hour usage checks remain deferred while the project is local-first.
+
 ## Testing Goals
 
 - Prove domain-state correctness under concurrent processing.

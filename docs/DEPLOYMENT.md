@@ -264,6 +264,8 @@ After either rollback or recovery:
 
 ## Separate Private Live Stack
 
+Local execution is the current priority. Owner-only cloud authentication/deployment and hosted idle-usage acceptance are deferred. The application uses local Redis/PostgreSQL but still requires internet for Alpaca. Closing the dashboard does not stop ingestion, workers, or Docker. Existing Fly/Vercel resources are not stopped by local shutdown commands.
+
 Do not change the public Fly app to private live. Use the isolated `infra/docker-compose.private.yml` stack with separate Redis/PostgreSQL and loopback-only ports. Copy `infra/.env.private.example` to ignored `infra/.env.private`, set operator Alpaca credentials and a local database password, then:
 
 ```bash
@@ -272,13 +274,19 @@ docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml
 
 Private frontend: `http://localhost:3030`; API: `http://localhost:8030`. The frontend uses compile-time API origins. `localhost` is the supported private-browser origin; a browser resolving it outside this machine cannot connect. No authentication exists: never publish these ports or depend on CORS for security.
 
-Ingestion initializes the session registry; live worker processes wait up to 30 seconds for it. The UI can change up to ten symbols without changing environment files. Source history is bounded at 100,000 messages per partition and orders at 256 per session. The MVP assumes 100 shares per quote round lot; verify stock units before use. Restart ingestion and both workers together when beginning a new bounded session:
+Ingestion initializes the session registry; live worker processes wait up to 30 seconds for it. The UI can change up to ten symbols without changing environment files. Source history is bounded at 100,000 messages per partition and orders at 256 per session. The MVP assumes 100 shares per quote round lot; verify stock units before use. Automatic coordinated session rollover and private retention are not implemented.
+
+For the current implementation, starting a new session requires stopping ingestion and both workers, waiting for any old ingestion lease to expire (up to 30 seconds), starting ingestion, confirming a new session is registered, and only then starting engine/persistence. Do not restart the three services concurrently and assume workers attach to the new session. For the isolated env-file setup:
 
 ```bash
-docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml restart ingestion engine persistence
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop ingestion engine persistence
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start ingestion
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start engine persistence
 ```
 
-If a previous session-owner lease remains after an abrupt kill, wait for its 30-second expiry before restarting. Existing workers must not keep processing an old run while ingestion registers a new one. Stop the private stack when finished; continuous ingestion intentionally consumes resources and does not share the public idle lifecycle:
+Perform the wait and new-session checks between the commands above. If replacing only an execution or persistence worker within the same session, a surviving 30-second ownership lease can cause the first restart to exit. Wait for expiry and retry the worker without restarting ingestion or deleting another owner's lease. This workaround was required in the October 2 live test; automatic retry is planned in Local A.
+
+Stop the private stack when finished; continuous ingestion intentionally consumes resources and does not share the public idle lifecycle:
 
 ```bash
 docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop
@@ -286,18 +294,29 @@ docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml
 
 Private history remains in its database/Redis until the operator handles retention. The public prune policy excludes it. No automatic destructive private cleanup is introduced.
 
+### Current Laptop Instance
+
+The instance started October 1 uses Docker project `tickertrace-local`, the ignored repository-root `.env` for Alpaca credentials, and a local-only database password override. Its containers do not use the hosted database or Redis URLs from that file. For this existing instance, run from the repository root:
+
+```bash
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml ps
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml stop
+```
+
+Use the same project name, env source, and local database password when starting this instance again. `stop` retains containers and database data. Do not use `down --volumes` to stop normal operation. After startup, verify registry/session IDs and all three live processes rather than assuming container start implies successful recovery. A fresh dedicated ignored env file remains the recommended reproducible setup for another laptop.
+
 ## Pre-Phase 7 External Acceptance Record
 
-Record these manually after explicitly redeploying; do not add scheduled application probes:
+The real local feed smoke test is recorded below. Remaining cloud checks are deferred, not completed or local-first blockers; perform them only if hosting is resumed explicitly. Do not add scheduled application probes:
 
 | Check | Evidence to record | Status |
 | --- | --- | --- |
-| Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Pending market window |
-| Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Pending market window |
-| New public browser workflow | Deployed backend/frontend versions; 300-event experiment, parameter comparison, final persisted result | Pending redeployment |
-| Five concurrent submissions | Five outcomes; exact one machine per worker group; no extra/spare machines | Pending redeployment |
-| Idle worker/API shutdown | Worker stop after grace period; API autostop after browser close | Pending redeployment |
-| 24-hour provider idle usage | Before/after timestamps, Fly states, Upstash command/data/bandwidth, Supabase DB/egress deltas | Pending observation |
+| Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Verified locally October 2; manual recovery only, see PRE_PHASE_7.md |
+| Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Pending Local C |
+| New public browser workflow | Deployed backend/frontend versions; 300-event experiment, parameter comparison, final persisted result | Deferred cloud acceptance |
+| Five concurrent submissions | Five outcomes; exact one machine per worker group; no extra/spare machines | Deferred cloud acceptance |
+| Idle worker/API shutdown | Worker stop after grace period; API autostop after browser close | Deferred cloud acceptance |
+| 24-hour provider idle usage | Before/after timestamps, Fly states, Upstash command/data/bandwidth, Supabase DB/egress deltas | Deferred cloud acceptance |
 
 The 1,000-credit budget must be lowered if measured command/egress deltas suggest quota risk. Stopped compute is not a guarantee of zero billing. Local integration tests do not certify provider usage or an external market feed.
 
