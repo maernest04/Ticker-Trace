@@ -5,7 +5,7 @@ import sys
 from dataclasses import replace
 from decimal import Decimal
 from datetime import UTC, datetime, timedelta
-from time import time
+from time import time, sleep
 from uuid import UUID, uuid4
 from unittest.mock import Mock
 
@@ -38,6 +38,45 @@ from market_execution_lab.storage import replay_runs, replay_session_settings
 
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires local Redis and PostgreSQL")
+def test_killed_consumer_replacement_and_api_restart_preserve_one_fill():
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    scenario = _new_run(generated_scenarios()[0])
+    partition = publish_replay(redis, scenario, dispatch=False)
+    stream = partition_stream_name(str(scenario.order.run_id), partition)
+    redis.xgroup_create(stream, ENGINE_GROUP, id="0-0")
+    crashed = subprocess.run([
+        sys.executable, "-c",
+        "import os, signal, sys; from redis import Redis; "
+        "r=Redis.from_url(os.environ['REDIS_URL'], decode_responses=True, socket_timeout=5); "
+        "assert r.xreadgroup('engine', 'crashed-process', {sys.argv[1]: '>'}, count=2); "
+        "os.kill(os.getpid(), signal.SIGKILL)", stream,
+    ], timeout=10, capture_output=True)
+    assert crashed.returncode == -9
+    assert redis.xpending(stream, ENGINE_GROUP)["pending"] == 2
+    sleep(1.1)
+    payload = {"run_id": str(scenario.order.run_id), "partition": partition}
+    with TestClient(create_worker_app("engine", redis, None, lambda: None)) as replacement:
+        assert replacement.post("/jobs", json=payload).status_code == 200
+    unavailable = DatabaseStore(sa.create_engine("postgresql+psycopg://unused:unused@127.0.0.1:1/unused", connect_args={"connect_timeout": 1}))
+    with TestClient(create_worker_app("persistence", redis, unavailable, lambda: None)) as persistence:
+        assert persistence.post("/jobs", json=payload).status_code == 503
+    sleep(1.1)
+    with TestClient(create_worker_app("persistence", redis, store, lambda: None)) as replacement:
+        assert replacement.post("/jobs", json=payload).status_code == 200
+        assert replacement.post("/jobs", json=payload).status_code == 200
+    assert redis.xpending(stream, ENGINE_GROUP)["pending"] == 0
+    assert redis.xpending(stream, PERSISTENCE_GROUP)["pending"] == 0
+    assert store.counts_for_run(scenario.order.run_id)["fills"] == 1
+    for _ in range(2):
+        app = create_api_app(os.environ["DATABASE_URL"], os.environ["REDIS_URL"])
+        app.state.public_request_limit = None
+        with TestClient(app) as api:
+            assert api.get(f"/api/v1/orders/{scenario.order.order_id}").json()["final_state"] == "filled"
+            assert api.get(f"/api/v1/replays/{scenario.order.run_id}").json()["status"] == "completed"
 
 
 @pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires local Redis and PostgreSQL")

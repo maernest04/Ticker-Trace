@@ -67,6 +67,13 @@ Required fixture scenarios:
 | Malformed or missing fields | The invalid source message is dead-lettered and valid replay messages complete. | `test_invalid_message_is_dead_lettered_without_stopping_the_replay` |
 | Engine worker loss | A replacement consumer claims pending messages and reaches the pure-simulation result. | `test_replacement_engine_recovers_pending_messages_after_a_worker_dies` |
 | Temporary database failure | The result remains pending until a replacement persistence worker completes it. | `test_persistence_recovers_after_a_temporary_database_failure` |
+| Killed consumer plus database connection refusal | Replacement workers preserve one fill and recreated APIs read the completed run. | `test_killed_consumer_replacement_and_api_restart_preserve_one_fill` |
+| Worker dependency outage | Safe correlated 503; capacity released; next healthy job succeeds. | `test_worker_dependency_failures_are_safe_correlated_and_recoverable` |
+| API dependency outage | Safe correlated HTTP 503 or WebSocket 1013; liveness is unaffected. | `test_api_dependency_outage_returns_safe_error_and_recovers`, `test_websocket_database_failure_closes_with_retryable_code` |
+| Completed persistence job retried | Return success without reprocessing or accessing Redis. | `test_completed_persistence_retry_returns_success_without_reprocessing` |
+| Cross-machine timestamps | Throughput uses comparable Unix timestamps; duration samples remain available. | `test_metrics_timestamps_are_comparable_between_processes` |
+
+Phase 6D verification: 70 tests passed with local Redis/PostgreSQL and the Next.js production build passed. Provider services were not disrupted. The operational runbook, manual health/metrics checks, and rollback boundaries are in `DEPLOYMENT.md`. Production rollback execution and the 24-hour idle usage observation are not certified by these local tests.
 
 ## Load Tests
 

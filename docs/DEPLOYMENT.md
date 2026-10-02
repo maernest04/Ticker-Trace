@@ -194,11 +194,73 @@ The application must refuse to start in `public_replay` mode when Alpaca credent
 
 ## Recovery and Rollback
 
-- Database migrations require a documented rollback or forward-fix plan.
-- Workers must recover from acknowledged checkpoints.
-- Cached state must be rebuildable.
-- Deployment rollback must not require deleting durable data.
-- Public replay remains available if the private live environment is offline.
+### On-Demand Diagnostics
+
+Run these only when investigating an issue; do not schedule them as uptime probes:
+
+```bash
+fly status -a ticker-trace
+fly checks list -a ticker-trace
+fly logs -a ticker-trace --no-tail
+curl -fsS https://ticker-trace.fly.dev/health
+curl -fsS https://ticker-trace.fly.dev/ready
+```
+
+`/health` checks process liveness without Redis or database traffic and is the Fly health-check target. `/ready` checks Redis connectivity only; it does not certify PostgreSQL, worker availability, or token validity. A generated replay is the end-to-end readiness check. HTTP requests can wake the API; `fly status` does not request the application. A stopped idle API is expected, not an uptime incident. Do not introduce an external dashboard/ready ping loop.
+
+Structured worker events now include `worker_job_started`, `worker_job_completed`, `worker_job_failed`, and `worker_idle_shutdown`. The API logs `replay_submission_failed`, `dependency_unavailable`, and `public_replay_cleanup_failed`. Trace `request_id` across API dispatch and worker job logs, and use `run_id` to locate the affected replay. Expected dependency failures record the error class only, not exception text, tokens, DSNs, or SQL parameters. HTTP errors carry a correlation ID; worker dependency failures return 503; WebSocket dependency failures close with code 1013.
+
+Read `/api/v1/replays/<run-id>/health?partition=<partition>` or `/metrics?run_id=<run-id>&partition=<partition>` only for an active investigation. Both use Redis; replay metrics expire after 15 minutes and are not durable monitoring history. Metrics include engine/persistence backlog, pending messages, processed-event throughput, and engine processing duration. Cross-machine timestamps use Unix time rather than process-relative monotonic clocks. Host clock skew can still affect short-run throughput; tiny fixture rates are diagnostic, not sustained-load resume evidence. Pre-6D timestamps are incompatible: run a fresh replay after deployment or let old metrics expire.
+
+The frontend fetches final health once when a replay completes, then stops polling. If metrics cannot be retrieved, it reports that the replay persisted but metrics are unavailable instead of claiming persistence is still pending.
+
+### Incident Recovery
+
+| Incident | Expected behavior | Operator action |
+| --- | --- | --- |
+| Worker clean idle exit | Machine stops without restart after 60 idle seconds. | No action. The next replay starts the existing machine. |
+| Worker process crash | Fly worker policy retries non-zero exits at most twice. | Inspect role/run logs. If crashes repeat, correct the dependency/configuration or roll back. Do not add spare machines or a polling loop. |
+| Worker job dependency failure | Job returns 503, releases its concurrency slot, and leaves the process healthy. | Restore the dependency, then submit a new generated replay. A job error is not a process crash. |
+| API crash/restart | Durable completed runs survive in PostgreSQL; in-flight HTTP requests may fail. | Confirm health/configuration, then run one smoke replay. Do not assume an interrupted HTTP job was cancelled. |
+| Redis unavailable or exhausted | Readiness/submissions fail closed; liveness remains healthy. | Check Upstash status, TLS URL and quotas. Resume normal requests after recovery; never reset production Redis or increase quotas automatically. |
+| Redis data loss/TTL expiry | Temporary streams/cache/metrics can be missing; PostgreSQL completion records remain. | Read durable order results or submit a fresh generated replay. Incomplete runs cannot resume without their source stream. |
+| PostgreSQL unavailable/paused | Worker/API dependency requests return safe errors; no fake completion is reported. | Resume/check Supabase manually and verify the connection endpoint. Then retry a generated replay. |
+| Fly worker token expired | Worker startup fails before replay publication. | Rotate the app-scoped token through Fly secrets, then verify one replay; never put it in Vercel or chat. |
+| Monthly replay allowance reached | New replay attempts return 429. | Check actual provider usage. Wait for the next UTC month; do not delete the counter as an incident workaround. |
+
+Public resubmission creates a new run ID; there is no automatic restart/resume loop for an abandoned public run. Source/result recovery within the TTL is tested using replacement consumers. An internal persistence retry for an already-completed run returns success without reprocessing. Acknowledged fills remain unique; do not delete durable data to recover a worker.
+
+The local operational suite kills a real consumer process after it claims messages, replaces the engine, refuses the persistence database connection, retries after restoring the valid store, and recreates the API against the same database. It verifies one durable fill. Redis outage/readiness recovery, safe error payloads, request-ID propagation, and completed-job retry behavior are covered by fault-injected unit tests. These are not claims that production Supabase/Upstash were stopped and restarted. Live provider outage drills require a separate staging environment.
+
+### Backend Rollback
+
+Before deploying, record the current successful backend image, its matching Fly configuration, the database migration revision, and the production frontend deployment URL. Keep that release as the known-good recovery target:
+
+```bash
+fly releases -a ticker-trace --image
+```
+
+On a regression, first capture the failing request/run ID and logs. Confirm the previous image is compatible with the current database schema, API response contracts, and rotated secrets. Then deploy that exact image with its matching saved configuration:
+
+```bash
+fly deploy -a ticker-trace --image <known-good-image> --config <known-good-fly-config> --ha=false --skip-release-command
+fly scale count api=1 engine=1 persistence=1 -a ticker-trace
+```
+
+Skip the release command only after checking schema compatibility; this avoids an old migration bundle trying to interpret a newer schema. If compatibility cannot be established, use a forward-fix rather than this rollback. Do not automatically run `alembic downgrade`, wipe Redis/PostgreSQL, restore exposed credentials, or destroy worker machines. No database migration is added by 6D. Rollback instructions are documented and CLI options checked, but no production rollback was executed.
+
+Fly release commands stop a deployment when migration execution fails; process/restart configuration follows the [Fly configuration reference](https://docs.fly.io/reference/configuration).
+
+### Frontend Rollback and Post-Recovery Check
+
+In Vercel's deployment history, use Instant Rollback to restore the previous compatible production deployment. Existing build-time API origins are part of that build; do not assume changing current environment settings updates it. Follow [Vercel's Instant Rollback documentation](https://vercel.com/docs/instant-rollback) and explicitly restore normal production promotion after the fix is ready.
+
+After either rollback or recovery:
+
+1. Confirm `public_replay`, exact allowed browser origins, and no Alpaca credentials in public services.
+2. Open a clean browser, submit one fixture, and verify final state, fill price, quantity, and final health metrics.
+3. Confirm engine and persistence return to stopped state, close the test browser, then confirm API autostop through `fly status` without waking it.
+4. Check provider counters manually and record the release/image, run ID, outcome, and any failure. The 24-hour idle-usage acceptance check remains separate.
 
 ## Deferred Deployment Decisions
 

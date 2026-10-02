@@ -30,7 +30,7 @@ def test_worker_dispatches_once_and_releases_capacity_after_failure(monkeypatch,
     redis, store = Mock(), Mock()
     with TestClient(create_worker_app(role, redis, store, Mock()), raise_server_exceptions=False) as client:
         payload = {"run_id": str(run_id), "partition": 0}
-        assert client.post("/jobs", json=payload).status_code == 500
+        assert client.post("/jobs", json=payload).status_code == 503
         assert client.post("/jobs", json=payload).json() == {"status": "completed"}
         assert client.post("/jobs", json={**payload, "partition": 16}).status_code == 422
     assert execute.call_count == 2

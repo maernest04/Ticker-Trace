@@ -212,24 +212,34 @@ export default function ExecutionLab() {
   }, [playbackSpeed, session?.events]);
 
   useEffect(() => {
-    if (!queued || replayComplete) {
+    if (!queued) {
       return;
     }
     let active = true;
+    const controller = new AbortController();
     const fetchHealth = async () => {
-      const response = await fetch(`/backend/replays/${queued.run_id}/health?partition=${queued.partition}`);
-      if (response.ok && active) {
-        setPipelineHealth((await response.json()) as PipelineHealth);
+      try {
+        const response = await fetch(`/backend/replays/${queued.run_id}/health?partition=${queued.partition}`, { signal: controller.signal });
+        const health = response.ok ? (await response.json()) as PipelineHealth : undefined;
+        if (active) {
+          setPipelineHealth(health);
+        }
+      } catch {
+        if (active) {
+          setPipelineHealth(undefined);
+        }
       }
     };
     void fetchHealth();
-    const timer = setInterval(() => void fetchHealth(), 1_000);
+    const timer = replayComplete ? undefined : setInterval(() => void fetchHealth(), 1_000);
     const deadline = setTimeout(() => {
       active = false;
+      controller.abort();
       clearInterval(timer);
     }, 90_000);
     return () => {
       active = false;
+      controller.abort();
       clearInterval(timer);
       clearTimeout(deadline);
     };
@@ -402,7 +412,7 @@ function ReplayComparison({ latency, primary, baseline }: { latency: number; pri
 }
 
 function PipelineStatus({ health, connectionState }: { health: PipelineHealth | undefined; connectionState: string }) {
-  return <section className="pipeline-status"><div className="insight-heading"><span className="eyebrow">Pipeline health</span><strong>{connectionState}</strong></div>{health ? <div className="health-metrics"><Metric label="Queue depth" value={String(health.queue_depth)} /><Metric label="Workers pending" value={String(health.engine_pending + health.persistence_pending)} /><Metric label="Throughput" value={`${health.throughput_events_per_second.toFixed(0)} events/s`} /><Metric label="Engine time" value={health.processing_latency_ms === null ? "—" : `${health.processing_latency_ms.toFixed(1)} ms`} /></div> : <p>Waiting for the run to reach the persistence worker…</p>}</section>;
+  return <section className="pipeline-status"><div className="insight-heading"><span className="eyebrow">Pipeline health</span><strong>{connectionState}</strong></div>{health ? <div className="health-metrics"><Metric label="Queue depth" value={String(health.queue_depth)} /><Metric label="Workers pending" value={String(health.engine_pending + health.persistence_pending)} /><Metric label="Throughput" value={`${health.throughput_events_per_second.toFixed(0)} events/s`} /><Metric label="Engine time" value={health.processing_latency_ms === null ? "—" : `${health.processing_latency_ms.toFixed(1)} ms`} /></div> : <p>{connectionState === "Replay complete" ? "Replay persisted successfully. Pipeline metrics are unavailable." : "Pipeline metrics unavailable; the replay connection is tracked above."}</p>}</section>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

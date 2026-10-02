@@ -222,7 +222,7 @@ Phase 1 is complete.
 - [x] Close completed WebSockets and bound browser retries and incomplete server sessions.
 - [x] Document manual provider usage checks without adding scheduled traffic that would defeat idle shutdown.
 - [x] Add startup, idle shutdown, active-job protection, Redis-outage, retention, and abandoned-source expiration tests.
-- [ ] Stage the app-scoped Fly worker token, deploy with no spare machines, and redeploy the frontend.
+- [x] Stage the app-scoped Fly worker token, deploy with no spare machines, and redeploy the frontend.
 - [ ] Verify deployed cold-start, concurrent replay behavior, and 24-hour idle provider usage.
 
 **Local verification:** 60 tests passed against local Redis/PostgreSQL; the frontend production build and Fly configuration validation passed. Demand dispatch is tested through the API and both workers, with persisted results, TTLs, and WebSocket closure. Retention tests preserve active, private-live, and benchmark records.
@@ -231,11 +231,14 @@ Phase 1 is complete.
 
 ### 6D — Operational Validation
 
-- [ ] Document rollback and recovery procedures.
-- [ ] Configure logs, metrics, and uptime/health checks.
-- [ ] Verify restart behavior for API, worker, Redis, and database dependencies.
+- [x] Document backend image/config rollback, database compatibility/forward-fix rules, frontend rollback, and incident recovery in `DEPLOYMENT.md`.
+- [x] Enable structured worker logs, propagate request IDs, sanitize expected dependency errors, and preserve dependency-free Fly liveness checks.
+- [x] Use comparable cross-machine metric timestamps and document clock-skew/TTL limitations; avoid scheduled probes that defeat idle shutdown.
+- [x] Test killed-consumer recovery, refused database connection recovery, API recreation, Redis outage/readiness recovery, and completed-job retry acknowledgement.
+- [x] Fetch final UI health once after completion, abort abandoned requests, and replace misleading persistence-waiting text.
+- [x] Verify the Python suite, frontend production build, and local browser replay.
 
-**Verification:** A clean browser completes the public replay workflow, while private live mode requires operator-controlled configuration and does not expose credentials or data publicly.
+**Verification:** 70 tests pass against local Redis/PostgreSQL. The recovery test kills a real claimed-message consumer, completes through replacement workers, and confirms one fill after API recreation. Frontend production build passes. The local browser confirms completed replay health with zero queue depth and zero pending workers; the older local persistence container was already stopped, so the smoke replay used a temporary targeted worker. Existing public/private isolation tests remain enforced. The earlier deployed 6C smoke test confirmed a complete AAPL replay and all three Fly machines stopped afterward. 6D changes still require redeployment; production outage/rollback drills were not performed, and the 24-hour idle-provider-usage check remains outstanding.
 
 ## Phase 7: Project Presentation
 

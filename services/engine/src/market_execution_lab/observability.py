@@ -2,7 +2,7 @@ import json
 import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
-from time import perf_counter
+from time import time
 
 from redis import Redis
 
@@ -76,4 +76,4 @@ def pipeline_metrics(redis: Redis, source_stream: str, run_id: str, partition: i
 
 
 def now_seconds() -> float:
-    return perf_counter()
+    return time()

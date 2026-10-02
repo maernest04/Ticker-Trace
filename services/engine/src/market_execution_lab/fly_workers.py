@@ -3,6 +3,7 @@ import os
 from time import monotonic, sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from market_execution_lab.observability import request_id_context
 
 
 class FlyWorkers:
@@ -53,7 +54,7 @@ class FlyWorkers:
     def execute(self, hosts: dict[str, str], run_id, partition: int) -> None:
         payload = json.dumps({"run_id": str(run_id), "partition": partition}).encode()
         for role in ("engine", "persistence"):
-            request = Request(f"{hosts[role]}/jobs", data=payload, headers={"Content-Type": "application/json"})
+            request = Request(f"{hosts[role]}/jobs", data=payload, headers={"Content-Type": "application/json", "x-request-id": request_id_context.get()})
             with urlopen(request, timeout=60) as response:
                 if json.load(response)["status"] != "completed":
                     raise RuntimeError("worker job failed")

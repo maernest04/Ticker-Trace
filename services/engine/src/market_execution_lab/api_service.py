@@ -247,6 +247,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
                     log_event("public_replay_cleanup_failed", run_id=str(queued.order.run_id))
             return partition
         except (RuntimeError, OSError, RedisError) as error:
+            log_event("replay_submission_failed", run_id=str(queued.order.run_id), error_type=type(error).__name__)
             raise HTTPException(503, "execution workers unavailable; try again shortly") from error
 
     @app.exception_handler(HTTPException)
@@ -257,6 +258,15 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
             content={"error": {"code": "http_error", "message": str(error.detail), "request_id": request_id}},
             headers={"x-request-id": request_id},
         )
+
+    @app.exception_handler(RedisError)
+    @app.exception_handler(sa.exc.SQLAlchemyError)
+    async def dependency_error(request: Request | WebSocket, error: Exception):
+        log_event("dependency_unavailable", error_type=type(error).__name__)
+        if isinstance(request, WebSocket):
+            await request.close(code=1013)
+            return
+        return await http_error(request, HTTPException(503, "data service unavailable; try again shortly"))
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
