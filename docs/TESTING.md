@@ -1,5 +1,19 @@
 # Testing Strategy
 
+## Pre-Phase 7 implementation coverage
+
+The older unchecked strategy lists below describe desired scope, not proof of completion. New tests cover non-finalizing live snapshots, zero-valued metric round trips, deterministic longer datasets, size/latency differences, CLI pacing, public live-endpoint rejection, symbol bounds, fatal authentication, transient reconnect/malformed-message handling, subscription-task cleanup, quote freshness, ongoing live order execution, partition-owner rejection, pending reconstruction, and continuous backlog/durable-latency measurement.
+
+The private integration path uses normalized **generated Alpaca-format messages**, not an actual market connection. Local Redis/PostgreSQL demonstrate submitted → subsequent quote → filled, private WebSocket output, one durable fill after replacement, and public denial of that private data. Actual provider-fill acceptance remains separate.
+
+Run with dedicated local dependencies, not the hosted free tiers:
+
+```bash
+RUN_STREAMING_INTEGRATION=1 APP_MODE=public_replay REDIS_URL=redis://127.0.0.1:56379/0 DATABASE_URL=<dedicated-local-postgres-url> .venv/bin/python -m pytest -q
+```
+
+The continuous acceptance test offers generated input independently of consumers and samples backlog during production. It is not the former drain-after-each-batch test. External market, deployed concurrency, rollback, and 24-hour provider-counter checks remain operator acceptance tasks in `PRE_PHASE_7.md` and `DEPLOYMENT.md`.
+
 ## Testing Goals
 
 - Prove domain-state correctness under concurrent processing.

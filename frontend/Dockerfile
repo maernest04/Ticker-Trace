@@ -11,6 +11,8 @@ WORKDIR /app
 
 ARG API_URL=http://api:8000
 ENV API_URL=$API_URL
+ARG NEXT_PUBLIC_API_ORIGIN=http://localhost:8000
+ENV NEXT_PUBLIC_API_ORIGIN=$NEXT_PUBLIC_API_ORIGIN
 
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . ./

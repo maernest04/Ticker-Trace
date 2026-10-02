@@ -92,6 +92,8 @@ select, input { background: #101210; border: 1px solid #303530; border-radius: 2
 
 .watchlist-row strong { color: #f0f4f0; }
 
+.dataset-name { color: #7c837d; display: block; font-size: 0.58rem; font-weight: 400; line-height: 1.4; margin-top: 4px; }
+
 .watchlist-row > span:nth-child(2), .watchlist-row > span:nth-child(3) { text-align: right; }
 
 .panel-note { font-size: 0.67rem; line-height: 1.42; margin-bottom: 12px; margin-top: 13px; }
@@ -230,7 +232,7 @@ select, input { background: #101210; border: 1px solid #303530; border-radius: 2
 
 .execution-metrics strong { color: #e3e9e3; font-size: 0.79rem; }
 
-.transition-list { border-top: 1px solid #272b27; margin-top: 13px; }
+.transition-list { border-top: 1px solid #272b27; margin-top: 13px; max-height: 240px; overflow: auto; }
 
 .transition-list > div { align-items: center; border-bottom: 1px solid #242824; color: #aab2aa; display: grid; font-size: 0.72rem; gap: 10px; grid-template-columns: 110px 1fr 90px; padding: 8px 0; }
 
@@ -239,6 +241,7 @@ select, input { background: #101210; border: 1px solid #303530; border-radius: 2
 .transition-list time { color: #7e867f; text-align: right; }
 
 .fill-note { color: #bdc6bd; font-size: 0.73rem; margin: 11px 0 0; }
+.fill-list { max-height: 180px; overflow: auto; }
 
 .replay-insights { border-top: 1px solid #272b27; display: grid; gap: 20px; grid-template-columns: 1fr 1fr; margin-top: 13px; padding-top: 13px; }
 

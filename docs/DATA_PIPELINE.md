@@ -1,5 +1,44 @@
 # Data Pipeline
 
+## Current implemented flow — pre-Phase 7
+
+The sections below the historical-proposal heading describe initial intent, not current guarantees.
+
+### Contracts and units
+
+Pydantic quote/trade envelopes contain event ID, schema version, run ID, symbol, event/ingestion times, sequence, partition, and typed Decimal prices/whole-share quantities. Alpaca quotes report round lots; this MVP assumes 100 shares per lot, while trades already report shares. Verify symbol lot units before using other securities. Quote identifiers include timestamp, prices, and sizes to preserve liquidity-only changes.
+
+Stream messages currently use `replay.started.v1`, `order.command.v1`, `market.event.v1`, `replay.completed.v1`, and `execution.result.v1`. Fills/transitions are fields in result snapshots, not separate event channels. Malformed messages are dead-lettered.
+
+### Public replay
+
+1. Validate one of nine generated datasets/order commands and reserve weighted monthly credits on public Fly.
+2. Wake/check workers, then publish header, command, ordered events, and completion marker into an isolated run stream.
+3. Reconstruct/finalize the simulation, verify against pure execution, cache state, and emit an execution result.
+4. Persist source and result data; return after demand-dispatched persistence completes.
+5. Deliver a completed WebSocket snapshot. The UI's 1×/5×/20× controls animate it locally.
+
+Three versioned longer datasets each contain 240 quotes and 60 trades across about six event-time seconds, varying spread, visible liquidity, volatility, and gaps. CLI `--playback-speed` or `--events-per-second` paces backend publication, mutually exclusively. Dispatch occurs after the completion marker; finite replay does not incrementally consume a partially published fixture. Public HTTP submissions retain maximum-speed publication.
+
+### Private live
+
+1. Explicitly start one operator ingestion session, initialize partitions/groups, acquire ownership, and register run/symbol/connection status.
+2. Authenticate, subscribe, normalize, and publish real incoming quotes/trades. Reconnect transient disconnects with bounded backoff; fatal provider rejection stops the feed; invalid messages are skipped.
+3. Pause production when source consumer backlog reaches 10,000. Stop at 100,000 retained messages per partition rather than deleting recovery history.
+4. Continuous engine consumers process commands and subsequent quotes; each independent order emits progress snapshots on state/quantity changes.
+5. Continuous persistence commits batches and snapshots, retaining a running session and deterministic fill IDs.
+6. Private UI/API expose ongoing quotes, received/provider quote age, subscription controls, event trace, and durable fill explanations.
+
+Live orders require the current `run_id`, no generated scenario, a subscribed symbol, and fresh provider/received quotes plus a connected feed within 15 seconds. Public orders require a generated scenario. Subscription changes are validated/persisted and sent through `ingestion.control` without environment edits.
+
+### Recovery, metrics, and limits
+
+Market/order hashes retain their legacy `state:replay`/`order:replay` names but isolate live data by run UUID. PostgreSQL stores durable events/results; benchmark JSON stays outside the database. Private streams are bounded, retained operator history; public TTL/pruning does not delete them. Restart ingestion and both workers together to change sessions; stop private operation when finished.
+
+Metrics include weighted fill price, fill rate, signed spread cost in currency per share, activation-to-fill times, and replay latency impact. Zero values remain zero. No separate brokerage-slippage, fee, basis-point spread, or market-impact model is implemented. Continuous certification samples active source/result backlog and event enqueue-to-durable-write latency; public tiny-fixture rates are not capacity evidence.
+
+## Historical original proposal (not implemented guarantees)
+
 ## Objective
 
 Define how market events enter the system, become trusted internal events, update distributed state, reach storage, and appear in the UI.

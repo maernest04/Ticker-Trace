@@ -57,6 +57,7 @@ type ExecutionMetrics = {
 
 type SessionOrder = {
   order_id: string;
+  symbol: string;
   final_state: string | null;
   remaining_quantity: number | null;
   metrics: ExecutionMetrics | null;
@@ -206,7 +207,13 @@ export default function ExecutionLab() {
     }
     setVisibleEventCount((current) => current === 0 ? 1 : Math.min(current, session.events.length));
     const timer = setInterval(() => {
-      setVisibleEventCount((current) => current >= session.events.length ? current : current + 1);
+      setVisibleEventCount((current) => {
+        if (current >= session.events.length) {
+          clearInterval(timer);
+          return current;
+        }
+        return current + 1;
+      });
     }, 600 / playbackSpeed);
     return () => clearInterval(timer);
   }, [playbackSpeed, session?.events]);
@@ -292,6 +299,10 @@ export default function ExecutionLab() {
     }
   }
 
+  if (mode === "private_live") {
+    return <PrivateLiveTerminal />;
+  }
+
   return (
     <main className="terminal">
       <header className="terminal-header">
@@ -300,7 +311,7 @@ export default function ExecutionLab() {
         <div className="terminal-controls">
           <span className="connection"><i /> {connectionState}</span>
           <div className="playback-controls" aria-label="Trace playback speed"><span>Trace</span>{[1, 5, 20].map((speed) => <button className={playbackSpeed === speed ? "active" : ""} key={speed} onClick={() => setPlaybackSpeed(speed)} type="button">{speed}×</button>)}</div>
-          <span className="mode">{mode === "private_live" ? "Private live" : "Public replay"}</span>
+          <span className="mode">Public replay</span>
           <label className="dataset" htmlFor="scenario">Dataset<select id="scenario" value={scenarioName} onChange={(event) => setScenarioName(event.target.value)} disabled={loading}>{scenarios.map((item) => <option key={item.name} value={item.name}>{item.symbol} · {scenarioTitle(item.name)}</option>)}</select></label>
         </div>
       </header>
@@ -315,12 +326,12 @@ export default function ExecutionLab() {
             <div className="watchlist-columns"><span>Symbol</span><span>Last</span><span>Replay Δ</span></div>
             <div className="watchlist-items">
               {scenarios.map((item) => {
-                const latestMarket = item.symbol === scenario.symbol && session?.market[item.symbol] ? session.market[item.symbol] : item.market;
-                return <button className={`watchlist-row ${item.name === scenario.name ? "selected" : ""}`} key={item.name} onClick={() => setScenarioName(item.name)} type="button"><strong>{item.symbol}</strong><span>{formatPrice(latestMarket.last_trade_price ?? latestMarket.ask_price ?? latestMarket.bid_price)}</span><Change value={item.replay_change_percent} /></button>;
+                const latestMarket = item.name === scenario.name && session?.market[item.symbol] ? session.market[item.symbol] : item.market;
+                return <button className={`watchlist-row ${item.name === scenario.name ? "selected" : ""}`} key={item.name} title={scenarioTitle(item.name)} onClick={() => setScenarioName(item.name)} type="button"><strong>{item.symbol}<small className="dataset-name">{scenarioTitle(item.name)}</small></strong><span>{formatPrice(latestMarket.last_trade_price ?? latestMarket.ask_price ?? latestMarket.bid_price)}</span><Change value={item.replay_change_percent} /></button>;
               })}
             </div>
             <p className="panel-note">Replay Δ compares the first and final fixture event, not live day performance.</p>
-            <div className="session-summary"><div><span>Mode</span><strong>{mode === "private_live" ? "Private live" : "Public replay"}</strong></div><div><span>Fixtures</span><strong>{scenarios.length} available</strong></div><div><span>Model</span><strong>Top of book</strong></div></div>
+            <div className="session-summary"><div><span>Mode</span><strong>Public replay</strong></div><div><span>Fixtures</span><strong>{scenarios.length} available</strong></div><div><span>Model</span><strong>Top of book</strong></div></div>
           </aside>
 
           <section className="market-workspace panel">
@@ -350,7 +361,7 @@ export default function ExecutionLab() {
           {activeOrder ? <ExecutionDetails order={activeOrder} events={session?.events ?? []} /> : queued ? <div className="queue-details"><span>Run ID <code>{queued.run_id}</code></span><span>Order ID <code>{queued.order_id}</code></span><span>Partition {queued.partition}</span><span>{connectionState}</span></div> : <div className="empty-lifecycle"><span>01</span><p>Configure a market or limit order in the ticket. Its queue, activation, fills, and explanation will appear here.</p></div>}
           {queued ? <div className="replay-insights"><ReplayComparison latency={Number(latency)} primary={activeOrder} baseline={baselineOrder} /><PipelineStatus health={pipelineHealth} connectionState={connectionState} /></div> : null}
         </section>
-        <footer className="status-ticker"><span><i /> {mode === "private_live" ? "Private live mode" : "Generated replay fixtures"}</span><span>Symbols {scenarios.length}</span><span>Execution model: top of book</span><span>Redis Streams → workers → PostgreSQL</span><span>{connectionState}</span></footer>
+        <footer className="status-ticker"><span><i /> Generated replay fixtures</span><span>Datasets {scenarios.length}</span><span>Execution model: top of book</span><span>Redis Streams → workers → PostgreSQL</span><span>{connectionState}</span></footer>
       </> : null}
     </main>
   );
@@ -358,6 +369,174 @@ export default function ExecutionLab() {
 
 function Field({ children, label }: { children: ReactNode; label: string }) {
   return <label className="field"><span>{label}</span>{children}</label>;
+}
+
+type LiveStatus = {
+  run_id: string;
+  symbols: string[];
+  status: string;
+  fresh: boolean;
+  market: Record<string, Scenario["market"] & { ingested_at?: string; quote_ingested_at?: string; quote_event_time?: string }>;
+};
+
+function PrivateLiveTerminal() {
+  const [live, setLive] = useState<LiveStatus>();
+  const [session, setSession] = useState<SessionSnapshot>();
+  const [symbol, setSymbol] = useState("");
+  const [symbols, setSymbols] = useState("");
+  const [side, setSide] = useState<Side>("buy");
+  const [orderType, setOrderType] = useState<OrderType>("market");
+  const [quantity, setQuantity] = useState("50");
+  const [limitPrice, setLimitPrice] = useState("");
+  const [latency, setLatency] = useState("0");
+  const [orderId, setOrderId] = useState("");
+  const [fillEvents, setFillEvents] = useState<MarketEvent[]>([]);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [connection, setConnection] = useState("Waiting for private ingestion");
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    const refresh = async () => {
+      try {
+        const response = await fetch("/backend/live/session", { signal: controller.signal });
+        if (!response.ok) {
+          throw new Error("Start the private ingestion and live workers to open a session.");
+        }
+        const status = await response.json() as LiveStatus;
+        if (active) {
+          setLive(status);
+          setSymbol((current) => status.symbols.includes(current) ? current : status.symbols[0] ?? "");
+        }
+      } catch (reason) {
+        if (active) {
+          setLive(undefined);
+          setError(reason instanceof Error ? reason.message : "Private feed unavailable");
+        }
+      } finally {
+        if (active) {
+          timer = setTimeout(() => void refresh(), 1_000);
+        }
+      }
+    };
+    void refresh();
+    return () => { active = false; controller.abort(); clearTimeout(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (!live?.run_id) {
+      return;
+    }
+    let active = true;
+    let socket: WebSocket;
+    let retry: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    setSession(undefined);
+    setOrderId("");
+    const connect = () => {
+      const origin = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:8000";
+      socket = new WebSocket(`${origin.replace(/^http/, "ws")}/ws/v1/sessions/${live.run_id}`);
+      socket.onopen = () => { attempts = 0; setConnection("Private session connected"); };
+      socket.onmessage = (message) => setSession(JSON.parse(message.data) as SessionSnapshot);
+      socket.onerror = () => socket.close();
+      socket.onclose = () => {
+        setConnection("Private session disconnected");
+        if (active && attempts++ < 10) {
+          retry = setTimeout(connect, 2_000);
+        }
+      };
+    };
+    connect();
+    return () => { active = false; socket?.close(); clearTimeout(retry); };
+  }, [live?.run_id]);
+
+  const market = live?.market[symbol];
+  const quoteTime = market?.quote_ingested_at || market?.ingested_at;
+  const age = quoteTime ? Math.max(0, (Date.now() - Date.parse(quoteTime)) / 1000, (Date.now() - Date.parse(market?.quote_event_time ?? market?.event_time ?? quoteTime)) / 1000) : null;
+  const fresh = Boolean(live?.fresh && market?.ask_price && age !== null && age <= 15);
+  const events = session?.events.filter((event) => event.symbol === symbol) ?? [];
+  const order = session?.orders.find((item) => item.order_id === orderId);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setFillEvents([]);
+    if (orderId && order?.fills.length) {
+      fetch(`/backend/orders/${orderId}/events`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error("Fill quote history unavailable");
+          }
+          const events = await response.json() as MarketEvent[];
+          if (!controller.signal.aborted) {
+            setFillEvents(events);
+          }
+        })
+        .catch(() => { if (!controller.signal.aborted) { setError("Fill quote history unavailable; durable event IDs remain shown."); } });
+    }
+    return () => controller.abort();
+  }, [orderId, order?.fills.length]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/backend/orders", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ run_id: live?.run_id, symbol, side, order_type: orderType, quantity: Number(quantity),
+          limit_price: orderType === "limit" ? Number(limitPrice) : null, latency_ms: Number(latency) }) });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error?.message ?? "Live simulation rejected");
+      }
+      setOrderId(result.order_id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Live simulation unavailable");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function updateSymbols() {
+    setError("");
+    try {
+      const response = await fetch("/backend/live/symbols", { method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "Private live", symbols: symbols.split(",").map((value) => value.trim()).filter(Boolean) }) });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error?.message ?? "Subscription update rejected");
+      }
+      setSymbols("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Subscription update unavailable");
+    }
+  }
+
+  return <main className="terminal">
+    <header className="terminal-header"><div className="brand"><strong>Market Execution Lab</strong></div><span className="mode">Private live · Alpaca IEX</span><span className="connection">{connection}</span></header>
+    {error ? <p className="notice error" role="alert">{error}</p> : null}
+    <section className="terminal-grid">
+      <aside className="watchlist panel"><div className="panel-heading"><h2>Live watchlist</h2></div>
+        {live?.symbols.map((item) => <button className={`watchlist-row ${item === symbol ? "selected" : ""}`} key={item} onClick={() => { setSymbol(item); setOrderId(""); }} type="button"><strong>{item}</strong><span>{formatPrice(live.market[item]?.ask_price ?? null)}</span></button>)}
+        <div className="ticket-fields"><Field label="Symbols (up to 10)"><input placeholder="AAPL, MSFT, NVDA" value={symbols} onChange={(event) => setSymbols(event.target.value)} /></Field><button type="button" disabled={!live || !symbols.trim()} onClick={() => void updateSymbols()}>Update subscriptions</button></div>
+        <p className="panel-note">Private operator session. Subscription changes need no environment edits. Continuous live operation uses resources while running.</p>
+      </aside>
+      <section className="market-workspace panel"><div className="market-heading"><h1>{symbol || "Waiting for feed"}</h1><span>{live?.status ?? "Unavailable"} · {age === null ? "No quote" : `${age.toFixed(1)}s old`} · {fresh ? "Fresh" : "Stale — orders disabled"}</span></div>
+        <div className="quote-strip"><Quote label="Bid" price={market?.bid_price ?? null} size={market?.bid_size} tone="bid" /><Quote label="Ask" price={market?.ask_price ?? null} size={market?.ask_size} tone="ask" /><Quote label="Last trade" price={market?.last_trade_price ?? null} /></div>
+        <div className="tape-panel"><div className="section-label">Real normalized market events</div>{events.length ? <PriceTrace events={events} /> : <p>Waiting for live persistence worker output…</p>}</div>
+        <p className="model-note">Simulated orders only. Each order is an independent top-of-book experiment, without shared liquidity, queue position, hidden depth, market impact, fees, or real brokerage execution.</p>
+      </section>
+      <form className="order-ticket panel" onSubmit={submit}><div className="panel-heading"><h2>Live simulated order</h2></div><div className="ticket-fields">
+        <Field label="Side"><select value={side} onChange={(event) => setSide(event.target.value as Side)}><option value="buy">Buy</option><option value="sell">Sell</option></select></Field>
+        <Field label="Order type"><select value={orderType} onChange={(event) => setOrderType(event.target.value as OrderType)}><option value="market">Market</option><option value="limit">Limit</option></select></Field>
+        <Field label="Quantity"><input required type="number" min="1" max="100000" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></Field>
+        {orderType === "limit" ? <Field label="Limit price"><input required type="number" min="0.01" step="0.01" value={limitPrice} onChange={(event) => setLimitPrice(event.target.value)} /></Field> : null}
+        <Field label="Artificial latency (ms)"><input required type="number" min="0" max="60000" value={latency} onChange={(event) => setLatency(event.target.value)} /></Field>
+      </div><button className="submit-order" disabled={submitting || !fresh} type="submit">{submitting ? "Submitting…" : "Submit private simulation"}</button><p className="ticket-note">Uses subsequent real quotes in this session, not generated scenarios. No zero-latency comparison is claimed for changing live conditions.</p></form>
+    </section>
+    <section className="execution-panel panel"><h2>Execution lifecycle</h2>{order ? <ExecutionDetails order={order} events={[...(session?.events ?? []), ...fillEvents]} /> : <p>{orderId ? "Waiting for engine and persistence…" : "Submit an independent simulated order."}</p>}</section>
+  </main>;
 }
 
 function Quote({ label, price, size, tone }: { label: string; price: string | null; size?: number | null; tone?: string }) {
@@ -378,20 +557,22 @@ function PriceTrace({ events }: { events: MarketEvent[] }) {
   const prices = pricedEvents.map((item) => Number(item.price));
   const low = Math.min(...prices);
   const high = Math.max(...prices);
-  const points = pricedEvents.map(({ price }, index) => {
-    const x = pricedEvents.length === 1 ? 50 : (index / (pricedEvents.length - 1)) * 100;
+  const firstTime = Date.parse(pricedEvents[0]?.event.event_time ?? "");
+  const lastTime = Date.parse(pricedEvents.at(-1)?.event.event_time ?? "");
+  const points = pricedEvents.map(({ event, price }) => {
+    const x = lastTime === firstTime ? 50 : ((Date.parse(event.event_time) - firstTime) / (lastTime - firstTime)) * 100;
     const y = high === low ? 50 : 88 - ((Number(price) - low) / (high - low)) * 76;
     return `${x},${y}`;
   }).join(" ");
 
-  return <div className="trace-content"><svg aria-label="Replay price trace" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline fill="none" points={points} stroke="#00d971" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />{pricedEvents.map(({ event, price }, index) => { const [x, y] = points.split(" ")[index].split(","); return <circle cx={x} cy={y} fill={event.event_type === "trade" ? "#f5ca4a" : "#00d971"} key={event.event_id} r="1.6" vectorEffect="non-scaling-stroke" />; })}</svg><div className="event-tape">{events.slice(-4).reverse().map((event) => <div key={event.event_id}><span>{event.event_type}</span><strong>{formatPrice(event.price ?? event.ask_price ?? event.bid_price)}</strong><small>{new Date(event.event_time).toLocaleTimeString()}</small></div>)}</div></div>;
+  return <div className="trace-content"><svg aria-label="Replay price trace" viewBox="0 0 100 100" preserveAspectRatio="none"><polyline fill="none" points={points} stroke="#00d971" strokeWidth="1.2" vectorEffect="non-scaling-stroke" />{pricedEvents.map(({ event }, index) => { const [x, y] = points.split(" ")[index].split(","); return <circle cx={x} cy={y} fill={event.event_type === "market.trade.v1" ? "#f5ca4a" : "#00d971"} key={event.event_id} r={pricedEvents.length > 100 ? 0.3 : 1.6} vectorEffect="non-scaling-stroke" />; })}</svg><div className="event-tape">{events.slice(-4).reverse().map((event) => <div key={event.event_id}><span>{event.event_type}</span><strong>{formatPrice(event.price ?? event.ask_price ?? event.bid_price)}</strong><small>{new Date(event.event_time).toLocaleTimeString()}</small></div>)}</div></div>;
 }
 
 function ExecutionDetails({ order, events }: { order: SessionOrder; events: MarketEvent[] }) {
   return <div className="execution-details">
     {order.metrics ? <div className="execution-metrics"><Metric label="Fill rate" value={`${(Number(order.metrics.fill_rate) * 100).toFixed(0)}%`} /><Metric label="Average fill" value={formatPrice(order.metrics.average_fill_price)} /><Metric label="Spread cost" value={formatPrice(order.metrics.spread_cost)} /><Metric label="Latency impact" value={formatPrice(order.metrics.latency_impact)} /><Metric label="Time to fill" value={order.metrics.time_to_completion_ms === null ? "—" : `${order.metrics.time_to_completion_ms} ms`} /></div> : null}
     <div className="transition-list">{order.transitions.map((transition) => { const event = events.find((item) => item.event_id === transition.triggering_event_id); return <div key={`${transition.state}-${transition.changed_at}`}><span className="transition-state">{transition.state}</span><span>{event ? `${event.event_type} ${event.event_id}` : "order submitted"}</span><time>{new Date(transition.changed_at).toLocaleTimeString()}</time></div>; })}</div>
-    {order.fills.map((fill) => <p className="fill-note" key={fill.fill_id}>Filled {fill.quantity} shares at {formatPrice(fill.price)} from event <code>{fill.triggering_event_id}</code>.</p>)}
+    <div className="fill-list">{order.fills.map((fill) => { const event = events.find((item) => item.event_id === fill.triggering_event_id); return <p className="fill-note" key={fill.fill_id}>Filled {fill.quantity} shares at {formatPrice(fill.price)} from event <code>{fill.triggering_event_id}</code>. {event ? `Quote: bid ${formatPrice(event.bid_price)} × ${event.bid_size}, ask ${formatPrice(event.ask_price)} × ${event.ask_size}.` : ""}</p>; })}</div>
   </div>;
 }
 

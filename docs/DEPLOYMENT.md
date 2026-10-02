@@ -97,7 +97,7 @@ The lifecycle implementation is locally tested. Production acceptance requires s
 - Upstash command, bandwidth, and data-size usage is sampled before and after lifecycle tests.
 - Redis streams, dead-letter streams, metrics hashes, market state, and order state receive explicit retention or trimming rules.
 - Completed generated public replay history is retained for seven days and at most the newest 1,000 runs. Cleanup deletes at most 100 eligible runs per successful submission, including their associated events, orders, fills, transitions, and settings. Private/live runs, active runs, watchlists, and non-generated benchmark scenarios are excluded. Cleanup is irreversible and occurs on demand, so expired rows can remain while the app is idle.
-- A shared Redis counter admits at most 1,000 replay attempts per UTC calendar month, including failed starts. This is a conservative demo envelope, not a measured provider-quota guarantee. Redis outages reject submissions; quota exhaustion returns HTTP 429.
+- A shared Redis counter admits at most 1,000 weighted credits per UTC calendar month, including failed starts. Each attempt reserves `max(1, ceil(event_count / 25))` credits; a 300-event experiment costs 12 and its zero-latency comparison costs another 12. This is a conservative demo envelope, not a measured provider-quota guarantee. Redis outages reject submissions; quota exhaustion returns HTTP 429.
 - Public replay creation and concurrent-session limits remain enforced server-side.
 - No provider auto-upgrade or payment method is enabled solely to handle an unexpected quota spike.
 - A lifecycle failure must fail closed by rejecting new replay work, not by creating an unbounded polling loop.
@@ -262,7 +262,46 @@ After either rollback or recovery:
 3. Confirm engine and persistence return to stopped state, close the test browser, then confirm API autostop through `fly status` without waking it.
 4. Check provider counters manually and record the release/image, run ID, outcome, and any failure. The 24-hour idle-usage acceptance check remains separate.
 
-## Deferred Deployment Decisions
+## Separate Private Live Stack
+
+Do not change the public Fly app to private live. Use the isolated `infra/docker-compose.private.yml` stack with separate Redis/PostgreSQL and loopback-only ports. Copy `infra/.env.private.example` to ignored `infra/.env.private`, set operator Alpaca credentials and a local database password, then:
+
+```bash
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml up --build
+```
+
+Private frontend: `http://localhost:3030`; API: `http://localhost:8030`. The frontend uses compile-time API origins. `localhost` is the supported private-browser origin; a browser resolving it outside this machine cannot connect. No authentication exists: never publish these ports or depend on CORS for security.
+
+Ingestion initializes the session registry; live worker processes wait up to 30 seconds for it. The UI can change up to ten symbols without changing environment files. Source history is bounded at 100,000 messages per partition and orders at 256 per session. The MVP assumes 100 shares per quote round lot; verify stock units before use. Restart ingestion and both workers together when beginning a new bounded session:
+
+```bash
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml restart ingestion engine persistence
+```
+
+If a previous session-owner lease remains after an abrupt kill, wait for its 30-second expiry before restarting. Existing workers must not keep processing an old run while ingestion registers a new one. Stop the private stack when finished; continuous ingestion intentionally consumes resources and does not share the public idle lifecycle:
+
+```bash
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop
+```
+
+Private history remains in its database/Redis until the operator handles retention. The public prune policy excludes it. No automatic destructive private cleanup is introduced.
+
+## Pre-Phase 7 External Acceptance Record
+
+Record these manually after explicitly redeploying; do not add scheduled application probes:
+
+| Check | Evidence to record | Status |
+| --- | --- | --- |
+| Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Pending market window |
+| Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Pending market window |
+| New public browser workflow | Deployed backend/frontend versions; 300-event experiment, parameter comparison, final persisted result | Pending redeployment |
+| Five concurrent submissions | Five outcomes; exact one machine per worker group; no extra/spare machines | Pending redeployment |
+| Idle worker/API shutdown | Worker stop after grace period; API autostop after browser close | Pending redeployment |
+| 24-hour provider idle usage | Before/after timestamps, Fly states, Upstash command/data/bandwidth, Supabase DB/egress deltas | Pending observation |
+
+The 1,000-credit budget must be lowered if measured command/egress deltas suggest quota risk. Stopped compute is not a guarantee of zero billing. Local integration tests do not certify provider usage or an external market feed.
+
+## Remaining Deferred Deployment Decisions
 
 The following do not block implementation and are intentionally postponed until deployment measurements exist:
 

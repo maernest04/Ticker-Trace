@@ -169,19 +169,19 @@ class DatabaseStore:
             )
 
     def record_event(self, event: MarketEvent) -> None:
+        self.record_events([event])
+
+    def record_events(self, events: list[MarketEvent]) -> None:
+        if not events:
+            return
         with self._engine.begin() as connection:
             connection.execute(
-                pg_insert(market_events).values(
-                    run_id=event.run_id,
-                    event_id=event.event_id,
-                    event_type=event.event_type,
-                    symbol=event.symbol,
-                    event_time=event.event_time,
-                    ingested_at=event.ingested_at,
-                    sequence=event.sequence,
-                    partition=event.partition,
-                    payload=event.model_dump(mode="json"),
-                ).on_conflict_do_nothing(constraint="uq_market_events_run_event")
+                pg_insert(market_events).values([
+                    dict(run_id=event.run_id, event_id=event.event_id, event_type=event.event_type,
+                         symbol=event.symbol, event_time=event.event_time, ingested_at=event.ingested_at,
+                         sequence=event.sequence, partition=event.partition, payload=event.model_dump(mode="json"))
+                    for event in events
+                ]).on_conflict_do_nothing(constraint="uq_market_events_run_event")
             )
 
     def record_replay_settings(self, run_id: UUID, mode: str, symbols: list[str]) -> None:
@@ -195,8 +195,16 @@ class DatabaseStore:
                 )
             )
 
-    def complete_run(self, order: OrderCommand, result: ExecutionResult, completed_at: datetime) -> None:
+    def complete_run(self, order: OrderCommand, result: ExecutionResult, completed_at: datetime, final: bool = True) -> None:
         with self._engine.begin() as connection:
+            if not final:
+                current = connection.execute(sa.select(orders.c.remaining_quantity).where(orders.c.order_id == order.order_id).with_for_update()).scalar_one_or_none()
+                latest_transition = connection.scalar(sa.select(sa.func.max(order_state_transitions.c.changed_at)).where(order_state_transitions.c.order_id == order.order_id))
+                if current is not None and (result.remaining_quantity > current or (
+                    result.remaining_quantity == current and latest_transition is not None
+                    and max(transition.changed_at for transition in result.transitions) < latest_transition
+                )):
+                    return
             if result.fills:
                 connection.execute(
                     pg_insert(fills).values(
@@ -242,11 +250,12 @@ class DatabaseStore:
                     latency_impact=result.metrics.latency_impact,
                 )
             )
-            connection.execute(
-                sa.update(replay_runs)
-                .where(replay_runs.c.run_id == order.run_id)
-                .values(status="completed", completed_at=completed_at)
-            )
+            if final:
+                connection.execute(
+                    sa.update(replay_runs)
+                    .where(replay_runs.c.run_id == order.run_id)
+                    .values(status="completed", completed_at=completed_at)
+                )
 
     def counts_for_run(self, run_id: UUID) -> dict[str, int]:
         with self._engine.connect() as connection:
@@ -334,6 +343,17 @@ class DatabaseStore:
             )
         return [dict(row) for row in reversed(rows)]
 
+    def events_for_order(self, order_id: UUID) -> list[dict[str, object]]:
+        with self._engine.connect() as connection:
+            rows = connection.execute(
+                sa.select(market_events)
+                .join(fills, fills.c.triggering_event_id == market_events.c.event_id)
+                .join(orders, orders.c.order_id == fills.c.order_id)
+                .where(orders.c.order_id == order_id, market_events.c.run_id == orders.c.run_id)
+                .order_by(market_events.c.event_time, market_events.c.sequence)
+            ).mappings()
+            return [dict(row) for row in rows]
+
     def list_watchlists(self) -> list[dict[str, object]]:
         with self._engine.connect() as connection:
             return [
@@ -394,7 +414,7 @@ class DatabaseStore:
 
 
 def _milliseconds(value) -> int | None:
-    return int(value.total_seconds() * 1_000) if value else None
+    return int(value.total_seconds() * 1_000) if value is not None else None
 
 
 def _order_metrics(order) -> dict[str, object] | None:

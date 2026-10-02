@@ -1,0 +1,96 @@
+services:
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tickertrace
+      POSTGRES_USER: tickertrace
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}
+    volumes:
+      - private_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tickertrace -d tickertrace"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build: ..
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingestion:
+    build: ..
+    command: market-execution-ingestion
+    environment:
+      APP_MODE: private_live
+      REDIS_URL: redis://redis:6379/0
+      ALPACA_API_KEY: ${ALPACA_API_KEY:?set private Alpaca key}
+      ALPACA_API_SECRET: ${ALPACA_API_SECRET:?set private Alpaca secret}
+      ALPACA_SYMBOLS: ${ALPACA_SYMBOLS:-AAPL,MSFT}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  engine:
+    build: ..
+    command: market-execution-live-worker --role engine
+    environment:
+      APP_MODE: private_live
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      ingestion:
+        condition: service_started
+
+  persistence:
+    build: ..
+    command: market-execution-live-worker --role persistence
+    environment:
+      APP_MODE: private_live
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
+    depends_on:
+      ingestion:
+        condition: service_started
+
+  api:
+    build: ..
+    command: market-execution-api
+    environment:
+      APP_MODE: private_live
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
+      PUBLIC_ALLOWED_ORIGINS: http://localhost:3030,http://127.0.0.1:3030
+    ports:
+      - "127.0.0.1:8030:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ../frontend
+      args:
+        API_URL: http://api:8000
+        NEXT_PUBLIC_API_ORIGIN: http://localhost:8030
+    ports:
+      - "127.0.0.1:3030:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  private_postgres_data:

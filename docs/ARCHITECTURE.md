@@ -1,5 +1,42 @@
 # Architecture
 
+## Current implemented architecture — pre-Phase 7
+
+This section describes shipped code. The original proposal below is retained as historical design intent, not an implementation claim.
+
+```text
+Public: Next.js → FastAPI → generated fixture → Redis source
+                    ↓ demand HTTP dispatch
+             Engine → Redis result → Persistence → PostgreSQL
+                    ↓ completed WebSocket snapshot
+             Browser local trace animation
+
+Private: Alpaca IEX → async ingestion → retained symbol partitions
+                                      ├→ continuous engine → results
+                                      └→ continuous persistence → PostgreSQL
+         Next.js → FastAPI → live order command ────┘
+         Next.js ← ongoing WebSocket snapshots + status/quote reads
+```
+
+- All Python applications share `services/engine/src/market_execution_lab`; separate entry points provide process ownership without separate source packages.
+- Public Fly requires exactly one existing engine and persistence machine. API submission wakes them and executes engine then persistence before returning. Local queue mode remains separate.
+- Public replay reconstructs and finalizes finite input; it is not incremental processing during producer pacing. Private workers continuously process new events and snapshot order progress without ending their live session.
+- CRC32(symbol) modulo 16 partitions each isolated run. This is not a global per-stock queue across runs.
+- Private ingestion authenticates before subscribing, reconnects transient failures with backoff capped at 30 seconds, skips invalid market messages, and stops on fatal authentication/subscription errors. Provider correction/cancellation semantics are not modeled.
+- Private worker partition leases reject competing owners; lost leases cause exit. This is not consensus or a zero-pause fencing guarantee. Replacement engines rebuild from retained delivered input and reclaim pending messages.
+- Each live order is an independent top-of-book experiment; orders do not compete for shared liquidity. Snapshots persist submitted/active/partial/filled progress. No live zero-latency counterfactual is claimed.
+- Live persistence batches up to 100 source messages and acknowledges after commit; finite replay still writes market events individually. Results update order progress independently of session completion.
+- Private sessions allow up to ten symbols, 256 orders, and 100,000 retained source messages per partition. Reaching capacity requires restarting ingestion and both workers together. Private history is not silently trimmed or expired.
+- Private production pauses at 10,000 source pending/unconsumed messages; the order API rejects stale quotes, disconnected feeds, unsubscribed symbols, and excess capacity. The 15-second freshness policy is not exchange-grade market-status handling. Pausing/reconnecting may miss provider events; none are invented.
+- Redis hashes cache market/order state, quote-specific timestamps, and private session status. Recovery uses retained input; no general database-to-cache rebuild service exists.
+- PostgreSQL stores events, runs, orders, fills, transitions, watchlists, and settings. Benchmark results are JSON files, not database tables. No sorted-set state model or bundled Grafana dashboards are implemented.
+- Public admission uses 1,000 weighted credits/month: `max(1, ceil(event_count / 25))` credits per attempt. A 300-event experiment costs 12. Provider-counter safety remains an external acceptance check.
+- Public source/cache/result TTLs and idle shutdown remain unchanged. Abandoned public runs are not automatically resumed; global queue-job crash recovery is not certified.
+- Finite replay scaling and continuous certification use local threads, not a measured fleet of distributed engine machines. Durable-write latency is separate from engine batch time and simulated execution delay.
+- Private endpoints require a separate private network or loopback deployment and separate dependencies. CORS is not authentication. Public reads/WebSockets reject private session data. Continuous private ingestion is not an idle-safe public workload.
+
+## Historical original proposal (not a completion checklist)
+
 ## Architectural Goals
 
 - Support real-time market-data ingestion and UI updates.

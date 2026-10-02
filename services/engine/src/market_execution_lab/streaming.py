@@ -5,7 +5,7 @@ from typing import Iterable
 
 from redis import Redis
 
-from market_execution_lab.engine import ExecutionEngine, ExecutionResult, simulate
+from market_execution_lab.engine import ExecutionEngine, ExecutionResult, MarketState, simulate
 from market_execution_lab.models import MarketEvent, OrderCommand, QuoteEvent, TradeEvent
 from market_execution_lab.storage import DatabaseStore
 
@@ -81,14 +81,19 @@ class RedisReplayRunner:
         self._store.complete_run(order, result, datetime.now(order.submitted_at.tzinfo))
         return result
 
-def cache_market_state(redis: Redis, key: str, engine: ExecutionEngine, event: MarketEvent) -> None:
-    state = engine.market_state
+def cache_market_state(redis: Redis, key: str, engine: ExecutionEngine | MarketState, event: MarketEvent) -> None:
+    state = engine if isinstance(engine, MarketState) else engine.market_state
+    if (state.last_event_time, state.last_event_sequence) != (event.event_time, event.sequence):
+        return
     redis.hset(
         key,
         mapping={
             "event_id": event.event_id,
             "event_time": event.event_time.isoformat(),
             "sequence": str(event.sequence),
+            "ingested_at": event.ingested_at.isoformat(),
+            "quote_event_time": state.quote_event_time.isoformat() if state.quote_event_time else "",
+            "quote_ingested_at": state.quote_ingested_at.isoformat() if state.quote_ingested_at else "",
             "last_trade_price": str(state.last_trade_price) if state.last_trade_price is not None else "",
             "bid_price": str(state.bid_price) if state.bid_price is not None else "",
             "bid_size": str(state.bid_size) if state.bid_size is not None else "",

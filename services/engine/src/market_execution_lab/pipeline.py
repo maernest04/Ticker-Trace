@@ -1,6 +1,7 @@
 import json
 import os
 import zlib
+from time import monotonic, sleep
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -60,7 +61,15 @@ def publish_replay(
     max_queue_depth: int = MAX_QUEUE_DEPTH,
     mode: str = "public_replay",
     dispatch: bool = True,
+    playback_speed: float | None = None,
+    events_per_second: float | None = None,
 ) -> int:
+    if playback_speed is not None and playback_speed <= 0:
+        raise ValueError("playback_speed must be positive")
+    if events_per_second is not None and events_per_second <= 0:
+        raise ValueError("events_per_second must be positive")
+    if playback_speed is not None and events_per_second is not None:
+        raise ValueError("choose event-time speed or events-per-second pacing, not both")
     partition = partition_for_symbol(scenario.order.symbol)
     stream = partition_stream_name(str(scenario.order.run_id), partition)
     events = tuple(event.model_copy(update={"partition": partition}) for event in scenario.events)
@@ -87,7 +96,14 @@ def publish_replay(
         stream,
         {"message_type": "order.command.v1", "payload": json.dumps(scenario.order.model_dump(mode="json"))},
     )
-    for event in events:
+    started_at = monotonic()
+    for index, event in enumerate(events):
+        offset = index / events_per_second if events_per_second else (
+            (event.event_time - events[0].event_time).total_seconds() / playback_speed if playback_speed else 0
+        )
+        delay = started_at + offset - monotonic()
+        if delay > 0:
+            sleep(delay)
         redis.xadd(stream, {"message_type": "market.event.v1", "payload": json.dumps(event.model_dump(mode="json"))})
     redis.xadd(stream, {"message_type": "replay.completed.v1", "payload": "{}"})
     record_metrics(
@@ -373,12 +389,12 @@ def _result_payload(result: ExecutionResult) -> dict[str, object]:
         "fills": [fill.model_dump(mode="json") for fill in result.fills],
         "transitions": [transition.model_dump(mode="json") for transition in result.transitions],
         "metrics": {
-            "average_fill_price": str(result.metrics.average_fill_price) if result.metrics.average_fill_price else None,
+            "average_fill_price": str(result.metrics.average_fill_price) if result.metrics.average_fill_price is not None else None,
             "fill_rate": str(result.metrics.fill_rate),
-            "spread_cost": str(result.metrics.spread_cost) if result.metrics.spread_cost else None,
+            "spread_cost": str(result.metrics.spread_cost) if result.metrics.spread_cost is not None else None,
             "time_to_first_fill_ms": _milliseconds(result.metrics.time_to_first_fill),
             "time_to_completion_ms": _milliseconds(result.metrics.time_to_completion),
-            "latency_impact": str(result.metrics.latency_impact) if result.metrics.latency_impact else None,
+            "latency_impact": str(result.metrics.latency_impact) if result.metrics.latency_impact is not None else None,
         },
         "processed_events": result.processed_events,
         "duplicate_events": result.duplicate_events,
@@ -408,7 +424,7 @@ def _result_from_payload(payload: dict[str, object]) -> ExecutionResult:
 
 
 def _milliseconds(value):
-    return int(value.total_seconds() * 1000) if value else None
+    return int(value.total_seconds() * 1000) if value is not None else None
 
 
 def _timedelta_from_milliseconds(value):

@@ -6,13 +6,13 @@
 
 ## Draft Bullets
 
-- Built a distributed stock-execution simulator that streams live and replays recorded market data, explaining fill price, slippage, liquidity, and latency across simulated market and limit orders
-- Engineered an `asyncio` ingestion pipeline and idempotent Redis Streams workers, sustaining `[X]` events/sec at `[X] ms` p95 latency while preserving per-symbol event ordering
-- Implemented deterministic replay and worker-failure recovery across `[X]` concurrent processes, reducing experiment runtime by `[X]%` with zero duplicate fills across `[X]` test events
+- Built a deployable stock-execution lab with generated replay experiments and a separate private Alpaca IEX pipeline, tracing simulated market/limit fills to their triggering quotes
+- Engineered independently runnable Python consumers with Redis Streams, PostgreSQL, freshness checks, and retained-event recovery; validated `[X]` events through the documented local continuous-load workload
+- Implemented deterministic replay, partial fills, and latency comparisons in Next.js; measured `[X]%` higher finite-replay throughput across `[X]` concurrent local benchmark threads
 
 ## Alternative UI-Focused First Bullet
 
-- Built and deployed an interactive stock-execution lab for comparing simulated orders across live and replayed market conditions, visualizing spread cost, slippage, fill rate, and latency impact in real time
+- Built and deployed a generated-data stock-execution dashboard for comparing order size and latency, visualizing spread cost, fill rate, and quote-linked execution outcomes
 
 ## Metrics to Collect
 
@@ -26,3 +26,5 @@
 - Queue depth and consumer lag under peak load
 
 Do not replace `[X]` placeholders until the corresponding result has been measured with a reproducible benchmark.
+
+The original saved finite-replay result used local threads, not distributed processes. The one-million-event check is in-memory only. The pre-Phase 7 continuous smoke result is short local evidence, not sustained real-feed or production performance. Do not claim historical vendor-data replay, a deployed private-live UI, end-to-end fill/browser p95 latency, or 24-hour quota safety until separately verified.

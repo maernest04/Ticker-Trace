@@ -19,6 +19,8 @@ from market_execution_lab.models import (
 
 @dataclass
 class MarketState:
+    quote_event_time: datetime | None = None
+    quote_ingested_at: datetime | None = None
     bid_price: Decimal | None = None
     bid_size: int | None = None
     ask_price: Decimal | None = None
@@ -171,6 +173,11 @@ class ExecutionEngine:
                 )
             )
 
+        self._final_result = self.snapshot()
+        return self._final_result
+
+    def snapshot(self) -> ExecutionResult:
+        activation_time = self.order.submitted_at + timedelta(milliseconds=self.order.latency_ms)
         average_fill_price = _average_fill_price(self._fills)
         fill_rate = Decimal(self.order.quantity - self._remaining_quantity) / Decimal(self.order.quantity)
         spread_cost = None
@@ -180,7 +187,7 @@ class ExecutionEngine:
             else:
                 spread_cost = self._arrival_midpoint - average_fill_price
 
-        self._final_result = ExecutionResult(
+        return ExecutionResult(
             state=self._state,
             remaining_quantity=self._remaining_quantity,
             fills=tuple(self._fills),
@@ -197,7 +204,6 @@ class ExecutionEngine:
             duplicate_events=self._duplicate_events,
             stale_events=self._stale_events,
         )
-        return self._final_result
 
 
 def simulate(order: OrderCommand, events: Iterable[MarketEvent]) -> ExecutionResult:
@@ -238,6 +244,8 @@ def _apply_event_to_market_state(state: MarketState, event: MarketEvent) -> None
     state.last_event_sequence = event.sequence
 
     if isinstance(event, QuoteEvent):
+        state.quote_event_time = event.event_time
+        state.quote_ingested_at = event.ingested_at
         state.bid_price = event.bid_price
         state.bid_size = event.bid_size
         state.ask_price = event.ask_price

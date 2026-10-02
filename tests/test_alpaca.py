@@ -22,9 +22,11 @@ def test_normalizes_alpaca_quote() -> None:
     )
 
     assert isinstance(event, QuoteEvent)
-    assert event.event_id == "alpaca:q:AAPL:2026-09-29T13:30:00Z:199.98:200.0"
+    assert event.event_id == "alpaca:q:AAPL:2026-09-29T13:30:00Z:199.98:200.0:2:1"
     assert event.partition == 3
     assert event.sequence == 7
+    assert event.bid_size == 200
+    assert event.ask_size == 100
 
 
 def test_normalizes_alpaca_trade() -> None:

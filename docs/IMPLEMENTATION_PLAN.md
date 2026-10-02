@@ -218,7 +218,7 @@ Phase 1 is complete.
 - [x] Replace public worker queue polling with private HTTP job dispatch; retain queue mode for local benchmarks and private live operation.
 - [x] Check startup readiness, tolerate concurrent start conflicts, reject duplicate in-flight run IDs, and shut workers down after 60 idle seconds without interrupting active work.
 - [x] Expire published-but-abandoned source streams after one hour and completed replay state after 15 minutes.
-- [x] Enforce a shared 1,000 replay-attempt monthly allowance and prune completed generated public runs older than seven days or beyond the newest 1,000, at most 100 runs per successful submission.
+- [x] Enforce a shared monthly admission allowance and prune completed generated public runs older than seven days or beyond the newest 1,000, at most 100 runs per successful submission. Pre-Phase 7 makes admission 1,000 weighted credits, charging longer fixtures proportionally.
 - [x] Close completed WebSockets and bound browser retries and incomplete server sessions.
 - [x] Document manual provider usage checks without adding scheduled traffic that would defeat idle shutdown.
 - [x] Add startup, idle shutdown, active-job protection, Redis-outage, retention, and abandoned-source expiration tests.
@@ -239,6 +239,10 @@ Phase 1 is complete.
 - [x] Verify the Python suite, frontend production build, and local browser replay.
 
 **Verification:** 70 tests pass against local Redis/PostgreSQL. The recovery test kills a real claimed-message consumer, completes through replacement workers, and confirms one fill after API recreation. Frontend production build passes. The local browser confirms completed replay health with zero queue depth and zero pending workers; the older local persistence container was already stopped, so the smoke replay used a temporary targeted worker. Existing public/private isolation tests remain enforced. The earlier deployed 6C smoke test confirmed a complete AAPL replay and all three Fly machines stopped afterward. 6D changes still require redeployment; production outage/rollback drills were not performed, and the 24-hour idle-provider-usage check remains outstanding.
+
+## Pre-Phase 7: Product and Evidence Completion
+
+Complete A (private live execution), B (meaningful replay), and C (continuous-load evidence and honest documentation) using the build and acceptance checklists in [PRE_PHASE_7.md](PRE_PHASE_7.md). Local implementation and external market/deployment/24-hour checks are tracked separately. Do not treat the older checked phase items as proof that this exit gate passed.
 
 ## Phase 7: Project Presentation
 

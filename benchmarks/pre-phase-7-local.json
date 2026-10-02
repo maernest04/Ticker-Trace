@@ -1,0 +1,914 @@
+{
+  "methodology": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "cpu_count": 8,
+    "python": "3.13.1",
+    "revision": "pre-phase-7-working-tree",
+    "dataset": "continuous_quotes_v1",
+    "environment_note": "Isolated local dependencies; Docker VM 8 CPUs, 8215117824 bytes RAM; Redis 7-alpine and PostgreSQL 16-alpine; no per-container CPU or memory limits; local threads per worker role, not multi-machine scaling",
+    "workers_per_role": 2,
+    "partitions": 4,
+    "concurrency": "local threads, separate continuous engine and persistence consumers",
+    "requested_duration_seconds": 15.0,
+    "latency_basis": "event enqueue timestamp to committed PostgreSQL batch; includes queue and database time",
+    "acceptance": "offered rate >=95% target; steady backlog slope <=max(1 message/s,1% target); no final backlog, duplicates, losses, or worker errors",
+    "scope": "engine-only dedupe and local continuous pipeline are separate checks; not production-machine scaling"
+  },
+  "duplicate_fill_validation": {
+    "received_events": 1000000,
+    "duplicate_events": 10000,
+    "fills": 100,
+    "duplicate_fills": 0,
+    "passed": true
+  },
+  "sustained_pipeline_validation": {
+    "duration_seconds": 15.2110395840009,
+    "total_events": 3000,
+    "throughput_events_per_second": 197.22517868899803,
+    "target_events_per_second": 200.0,
+    "max_engine_lag": 9,
+    "max_persistence_lag": 9,
+    "offered_events_per_second": 198.83427880432893,
+    "final_backlog": 0,
+    "backlog_growth_per_second": -0.032090892886005216,
+    "latency_p50_ms": 1.3318061828613281,
+    "latency_p95_ms": 3.8177967071533203,
+    "latency_p99_ms": 33.88404846191406,
+    "persisted_events": 3000,
+    "duplicate_events": 0,
+    "samples": [
+      {
+        "seconds": 0.006917417000295245,
+        "engine": 9,
+        "persistence": 9,
+        "results": 0
+      },
+      {
+        "seconds": 0.11632975000065926,
+        "engine": 1,
+        "persistence": 3,
+        "results": 0
+      },
+      {
+        "seconds": 0.2242547090008884,
+        "engine": 2,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 0.32818033400144486,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 0.43275925000125426,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 0.5346003750000818,
+        "engine": 1,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 0.6372043749997829,
+        "engine": 2,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 0.7773550420006359,
+        "engine": 6,
+        "persistence": 8,
+        "results": 0
+      },
+      {
+        "seconds": 0.8872512500001903,
+        "engine": 1,
+        "persistence": 5,
+        "results": 0
+      },
+      {
+        "seconds": 0.996197000000393,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 1.103382250001232,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 1.2069999169998482,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 1.3137783750007657,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 1.4153972500007512,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 1.519478917000015,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 1.624203542000032,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 1.7287791250000737,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 1.8349750420002238,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 1.9399732090005273,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 2.042872250000073,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 2.144708334000825,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 2.247833500001434,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 2.3527593340004387,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 2.455994208999982,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 2.557820417001494,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 2.659632500000953,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 2.7634622500008845,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 2.8679730420008127,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 2.9735001670014753,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.078518250000343,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.183071084000403,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.288021917000151,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 3.3934380840000813,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.4981393750003917,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.6010832090014446,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.7067887089997384,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.8133564590007154,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 3.9182079170004727,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.019702000001416,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.1231079589997535,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 4.228305833999912,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.3307218340014515,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.434957250001389,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.538340042001437,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.643048334000923,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 4.749018334001448,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 4.853631625001071,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 4.960294334001446,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 5.111271334000776,
+        "engine": 2,
+        "persistence": 5,
+        "results": 0
+      },
+      {
+        "seconds": 5.213934375000463,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 5.317959125000925,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 5.423149000000194,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 5.524589874999947,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 5.62820075000127,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 5.7340514170009556,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 5.836248334000629,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 5.9436362920005195,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 6.047159917001409,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 6.1510767090003355,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 6.254319167001086,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 6.356342042001415,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 6.459629875000246,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 6.563049667000087,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 6.664593125000465,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 6.767389792001268,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 6.87272354200104,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 6.97784779200083,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 7.08140745899982,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 7.188398667000001,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.293325917000402,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.396197417001531,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.498290250001446,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 7.604056792000847,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.708203666999907,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.811643834000279,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 7.913984625000012,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.018754583999907,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.121215917000882,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.223625667000306,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 8.327806167000745,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 8.429729917001168,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.533316084000035,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 8.636282792000202,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 8.738950959001158,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.84479150000152,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 8.948681709000084,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.053865249999944,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 9.15851933400154,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 9.264111625001533,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.368320292000135,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.47377916700134,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.577772250000635,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.67968029199983,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 9.783141584000987,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.8873927500008,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 9.98962825000126,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 10.092160709000382,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 10.19818637500066,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 10.305105958999775,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 10.408098292000432,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 10.512393791999784,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 10.618092417000298,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 10.721403708999787,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 10.824597250000807,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 10.928103584001292,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 11.029658375000508,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.134008791999804,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.23639600000024,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 11.343154709000373,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 11.444583084001351,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.549054375000196,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 11.651539042000877,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.75348383399978,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.859016584001438,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 11.962940291999985,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 12.068394375000935,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 12.173156584000026,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 12.27881620900007,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 12.380711375000828,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 12.483291042000928,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 12.586294167000233,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 12.692915209001512,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 12.794607584000914,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 12.901438083999892,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.00835833400015,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 13.1098121670002,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.212973249999777,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.318175500000507,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.421218999999837,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.52376545900006,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 13.62808858400058,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 13.729618459001358,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 13.833368125000561,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 13.936310334000154,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.038290292000966,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 14.14348316700125,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.248092584000915,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.353508542000782,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.459870917000444,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 14.5632098340011,
+        "engine": 1,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.664701458999843,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      },
+      {
+        "seconds": 14.768290250000064,
+        "engine": 0,
+        "persistence": 1,
+        "results": 0
+      },
+      {
+        "seconds": 14.87743304200012,
+        "engine": 1,
+        "persistence": 2,
+        "results": 0
+      },
+      {
+        "seconds": 14.982833500000197,
+        "engine": 0,
+        "persistence": 0,
+        "results": 0
+      }
+    ],
+    "errors": [],
+    "infrastructure": {
+      "postgresql": "PostgreSQL 16.15 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+      "redis": "7.4.11"
+    },
+    "passed": true
+  },
+  "passed": true
+}

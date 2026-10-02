@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from time import time
+from math import ceil
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -15,12 +17,13 @@ import sqlalchemy as sa
 import uvicorn
 
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
-from market_execution_lab.fixtures import ScenarioFixture, generated_scenarios
+from market_execution_lab.fixtures import ScenarioFixture, replay_scenarios
+from market_execution_lab.live_pipeline import LIVE_SESSION_KEY, LIVE_STALE_SECONDS, LIVE_MAX_MESSAGES, LIVE_MAX_BACKLOG, LIVE_MAX_ORDERS, live_backlog
 from market_execution_lab.fly_workers import FlyWorkers
 from market_execution_lab.models import OrderCommand, OrderSide, OrderType, QuoteEvent, TradeEvent
 from market_execution_lab.observability import configure_logging, log_event, pipeline_metrics, request_id_context
 from market_execution_lab.operations_service import create_app as create_operations_app
-from market_execution_lab.pipeline import publish_replay
+from market_execution_lab.pipeline import partition_for_symbol, publish_replay
 from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 from market_execution_lab.streaming import market_state_key, partition_stream_name
 from redis.exceptions import RedisError
@@ -166,18 +169,22 @@ class ReplayCommandRequest(BaseModel):
 
 
 class OrderCommandRequest(BaseModel):
-    scenario_name: str
-    symbol: str
+    scenario_name: str | None = None
+    run_id: UUID | None = None
+    symbol: str = Field(min_length=1, max_length=10)
     side: OrderSide
     order_type: OrderType
-    quantity: int = Field(gt=0)
+    quantity: int = Field(gt=0, le=100_000)
     limit_price: Decimal | None = Field(default=None, gt=0)
-    latency_ms: int = Field(default=0, ge=0)
+    latency_ms: int = Field(default=0, ge=0, le=60_000)
 
     @field_validator("symbol")
     @classmethod
     def normalize_symbol(cls, value: str) -> str:
-        return value.strip().upper()
+        value = value.strip().upper()
+        if not value.replace(".", "").replace("-", "").isalnum():
+            raise ValueError("invalid symbol")
+        return value
 
     @model_validator(mode="after")
     def validate_limit_price(self) -> "OrderCommandRequest":
@@ -197,7 +204,7 @@ class QueuedReplayResponse(BaseModel):
 
 class WatchlistCommandRequest(BaseModel):
     name: str = Field(min_length=1, max_length=128)
-    symbols: list[str] = Field(min_length=1)
+    symbols: list[str] = Field(min_length=1, max_length=10)
 
     @field_validator("symbols")
     @classmethod
@@ -205,6 +212,8 @@ class WatchlistCommandRequest(BaseModel):
         symbols = sorted({value.strip().upper() for value in values if value.strip()})
         if not symbols:
             raise ValueError("watchlists require at least one symbol")
+        if any(len(symbol) > 10 or not symbol.replace(".", "").replace("-", "").isalnum() for symbol in symbols):
+            raise ValueError("invalid watchlist symbol")
         return symbols
 
 
@@ -222,8 +231,36 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     )
     store = DatabaseStore(sa.create_engine(sqlalchemy_url(database_url), connect_args={"connect_timeout": 10}))
     redis = app.state.redis
-    scenarios = {scenario.name: scenario for scenario in generated_scenarios()}
+    scenarios = {scenario.name: scenario for scenario in replay_scenarios()}
     workers = FlyWorkers() if os.getenv("FLY_WORKER_LIFECYCLE") == "on" else None
+    if workers and mode == "private_live":
+        raise ValueError("private live services must not use public Fly demand dispatch")
+
+    def live_session():
+        if mode != "private_live":
+            raise HTTPException(404, "live mode is not available in public replay")
+        session = redis.hgetall(LIVE_SESSION_KEY)
+        if not session:
+            raise HTTPException(503, "private ingestion has not started")
+        return session
+
+    @app.get("/api/v1/live/session")
+    def live_status():
+        session = live_session()
+        symbols = json.loads(session["symbols"])
+        fresh = session["status"] == "connected" and time() - float(session["received_at"]) <= LIVE_STALE_SECONDS
+        return {"run_id": session["run_id"], "symbols": symbols, "status": session["status"], "fresh": fresh,
+                "market": {symbol: redis.hgetall(market_state_key(session["run_id"], symbol)) for symbol in symbols}}
+
+    @app.put("/api/v1/live/symbols")
+    def live_symbols(request: WatchlistCommandRequest):
+        session = live_session()
+        watchlist_id = UUID(session["run_id"])
+        if not store.update_watchlist(watchlist_id, request.name, request.symbols):
+            store.create_watchlist(watchlist_id, request.name, request.symbols, datetime.now(UTC))
+        store.record_replay_settings(watchlist_id, "private_live", request.symbols)
+        _publish_watchlist_update(redis, UUID(session["run_id"]), request.symbols)
+        return {"status": "requested", "symbols": request.symbols}
 
     def submit(queued: ScenarioFixture) -> int:
         try:
@@ -232,8 +269,9 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
                 admitted = redis.eval(
                     "local n = tonumber(redis.call('GET', KEYS[1]) or '0'); "
                     "if n >= tonumber(ARGV[1]) then return 0 end; "
-                    "redis.call('INCR', KEYS[1]); redis.call('EXPIRE', KEYS[1], 2764800); return 1",
-                    1, f"public-replay-budget:{bucket}", 1000,
+                    "if n + tonumber(ARGV[2]) > tonumber(ARGV[1]) then return 0 end; "
+                    "redis.call('INCRBY', KEYS[1], ARGV[2]); redis.call('EXPIRE', KEYS[1], 2764800); return 1",
+                    1, f"public-replay-budget:{bucket}", 1000, max(1, ceil(len(queued.events) / 25)),
                 )
                 if not admitted:
                     raise HTTPException(429, "monthly demo replay allowance reached")
@@ -279,7 +317,8 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
 
     @app.get("/api/v1/symbols", response_model=list[SymbolResponse])
     def symbols() -> list[SymbolResponse]:
-        return [SymbolResponse(symbol=symbol) for symbol in store.list_symbols()]
+        available = sorted({scenario.order.symbol for scenario in scenarios.values()}) if mode == "public_replay" else json.loads(live_session()["symbols"])
+        return [SymbolResponse(symbol=symbol) for symbol in available]
 
     @app.get("/api/v1/configuration", response_model=ConfigurationResponse)
     def configuration() -> ConfigurationResponse:
@@ -291,6 +330,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
 
     @app.get("/api/v1/market/{symbol}", response_model=MarketStateResponse)
     def market(symbol: str, run_id: UUID) -> MarketStateResponse:
+        _replay_response(store, run_id, mode)
         state = redis.hgetall(market_state_key(str(run_id), symbol.upper()))
         if not state:
             raise HTTPException(status_code=404, detail="market state not found")
@@ -312,20 +352,26 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
         result = store.order_for_id(order_id)
         if result is None:
             raise HTTPException(status_code=404, detail="order not found")
+        _replay_response(store, result["run_id"], mode)
         return OrderResponse.model_validate(result)
 
     @app.get("/api/v1/replays/{run_id}", response_model=ReplayResponse)
     def replay(run_id: UUID) -> ReplayResponse:
-        return _replay_response(store, run_id)
+        return _replay_response(store, run_id, mode)
+
+    @app.get("/api/v1/orders/{order_id}/events", response_model=list[MarketEventResponse])
+    def fill_events(order_id: UUID):
+        order(order_id)
+        return [_event_response(event) for event in store.events_for_order(order_id)]
 
     @app.get("/api/v1/replays/{run_id}/events", response_model=list[MarketEventResponse])
     def replay_events(run_id: UUID, limit: int = 200) -> list[MarketEventResponse]:
-        _replay_response(store, run_id)
-        return [_event_response(event) for event in store.events_for_run(run_id, min(limit, 500))]
+        _replay_response(store, run_id, mode)
+        return [_event_response(event) for event in store.events_for_run(run_id, max(1, min(limit, 500)))]
 
     @app.get("/api/v1/replays/{run_id}/health", response_model=PipelineHealthResponse)
     def replay_health(run_id: UUID, partition: int) -> PipelineHealthResponse:
-        _replay_response(store, run_id)
+        _replay_response(store, run_id, mode)
         result = pipeline_metrics(redis, partition_stream_name(str(run_id), partition), str(run_id), partition)
         return PipelineHealthResponse(
             queue_depth=result.queue_depth,
@@ -356,6 +402,35 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
 
     @app.post("/api/v1/orders", response_model=QueuedReplayResponse, status_code=202)
     def create_order(request: OrderCommandRequest) -> QueuedReplayResponse:
+        if mode == "private_live":
+            session = live_session()
+            if request.scenario_name is not None or request.run_id != UUID(session["run_id"]):
+                raise HTTPException(422, "live orders require the current live run_id and no replay scenario")
+            if request.symbol not in json.loads(session["symbols"]):
+                raise HTTPException(422, "symbol is not subscribed")
+            state = redis.hgetall(market_state_key(session["run_id"], request.symbol))
+            now = time()
+            quote_time = state.get("quote_ingested_at")
+            provider_time = state.get("quote_event_time")
+            if session["status"] != "connected" or now - float(session["received_at"]) > LIVE_STALE_SECONDS or not quote_time or not provider_time or now - datetime.fromisoformat(quote_time).timestamp() > LIVE_STALE_SECONDS or now - datetime.fromisoformat(provider_time).timestamp() > LIVE_STALE_SECONDS or not state.get("ask_price"):
+                raise HTTPException(409, "live quote is stale or unavailable; wait for fresh market data")
+            partition = partition_for_symbol(request.symbol)
+            stream = partition_stream_name(session["run_id"], partition)
+            if live_backlog(redis, stream) >= LIVE_MAX_BACKLOG:
+                raise HTTPException(503, "live consumers are behind; wait before submitting")
+            command = OrderCommand(order_id=uuid4(), run_id=request.run_id, symbol=request.symbol, side=request.side,
+                                   order_type=request.order_type, quantity=request.quantity, limit_price=request.limit_price,
+                                   submitted_at=datetime.now(UTC), latency_ms=request.latency_ms)
+            admitted = redis.eval(
+                "if redis.call('XLEN', KEYS[1]) >= tonumber(ARGV[1]) or tonumber(redis.call('GET', KEYS[2]) or '0') >= tonumber(ARGV[2]) then return 0 end; "
+                "redis.call('INCR', KEYS[2]); redis.call('XADD', KEYS[1], '*', 'message_type', 'order.command.v1', 'payload', ARGV[3]); return 1",
+                2, stream, f"live:orders:{session['run_id']}", LIVE_MAX_MESSAGES, LIVE_MAX_ORDERS, command.model_dump_json(),
+            )
+            if not admitted:
+                raise HTTPException(429, "live session capacity reached; start a new private session")
+            return QueuedReplayResponse(run_id=command.run_id, order_id=command.order_id, partition=partition, status="queued")
+        if request.run_id is not None or request.scenario_name is None:
+            raise HTTPException(422, "public orders require a generated replay scenario")
         scenario = _scenario_for_name(scenarios, request.scenario_name)
         if request.symbol != scenario.order.symbol:
             raise HTTPException(status_code=422, detail="symbol does not match the selected replay scenario")
@@ -401,14 +476,17 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     async def session_updates(websocket: WebSocket, run_id: UUID) -> None:
         await websocket.accept()
         replay = store.replay_for_run(run_id)
-        if replay is None:
+        if replay is None or (replay.get("settings") and replay["settings"]["mode"] == "private_live" and mode != "private_live"):
             await websocket.close(code=1008)
             return
         last_payload = None
-        for _ in range(60):
+        is_live = replay.get("settings") and replay["settings"]["mode"] == "private_live"
+        iterations = 0
+        while is_live or iterations < 60:
+            iterations += 1
             latest_replay = ReplayResponse.model_validate(store.replay_for_run(run_id))
             latest_orders = [OrderResponse.model_validate(order) for order in store.orders_for_run(run_id)]
-            events = [_event_response(event) for event in store.events_for_run(run_id, 200)]
+            events = [_event_response(event) for event in store.events_for_run(run_id, 500)]
             market = {
                 symbol: redis.hgetall(market_state_key(str(run_id), symbol))
                 for symbol in (latest_replay.settings.symbols if latest_replay.settings else [])
@@ -503,9 +581,9 @@ def _application_mode() -> str:
     return mode
 
 
-def _replay_response(store: DatabaseStore, run_id: UUID) -> ReplayResponse:
+def _replay_response(store: DatabaseStore, run_id: UUID, mode: str | None = None) -> ReplayResponse:
     result = store.replay_for_run(run_id)
-    if result is None:
+    if result is None or (mode == "public_replay" and result.get("settings") and result["settings"]["mode"] == "private_live"):
         raise HTTPException(status_code=404, detail="replay not found")
     return ReplayResponse.model_validate(result)
 

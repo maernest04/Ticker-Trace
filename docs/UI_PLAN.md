@@ -1,5 +1,15 @@
 # UI Plan
 
+## Current implementation boundary
+
+Public mode selects nine generated datasets, submits independent replay orders, compares configured latency against the same fixture at zero latency, and animates completed recorded traces at 1×/5×/20×. These controls do not change backend processing speed. Longer datasets show 300 events with dataset names distinguishing experiments for the same stock.
+
+Private mode uses a separate terminal component: live subscription controls (up to ten symbols), real quote/provider freshness enforced server-side, buy/sell market/limit ticket, continuous session snapshots, and durable fill-event explanations. Quotes older than 15 seconds disable the ticket; connection/backend errors are visible. No zero-latency counterfactual is offered against changing live conditions. Private mode has no account authentication and must be loopback/network protected.
+
+The `/system` route and richer monitoring below are historical proposed scope; they are not implemented. There are no portfolio, candlestick indicators, real-money orders, or brokerage connections. Snapshot event history is bounded to the latest 500 persisted events; older triggering quotes are fetched separately for fill explanations and need not appear in the recent trace.
+
+## Original UI proposal
+
 ## UI Objective
 
 The interface lets a user submit a simulated stock order, watch its state change against a live or replayed quote stream, and understand exactly why it filled or remained open. It should not become a generic collection of financial charts.
