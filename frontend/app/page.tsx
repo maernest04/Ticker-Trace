@@ -62,7 +62,7 @@ type SessionOrder = {
   remaining_quantity: number | null;
   metrics: ExecutionMetrics | null;
   fills: { fill_id: string; triggering_event_id: string; quantity: number; price: string; filled_at: string }[];
-  transitions: { state: string; changed_at: string; triggering_event_id: string | null }[];
+  transitions: { state: string; changed_at: string; triggering_event_id: string | null; reason?: string | null }[];
 };
 
 type SessionSnapshot = {
@@ -439,10 +439,10 @@ function PrivateLiveTerminal() {
       const origin = process.env.NEXT_PUBLIC_API_ORIGIN ?? "http://localhost:8000";
       socket = new WebSocket(`${origin.replace(/^http/, "ws")}/ws/v1/sessions/${live.run_id}`);
       socket.onopen = () => { attempts = 0; setConnection("Private session connected"); };
-      socket.onmessage = (message) => setSession(JSON.parse(message.data) as SessionSnapshot);
+      socket.onmessage = (message) => { if (active) { setSession(JSON.parse(message.data) as SessionSnapshot); } };
       socket.onerror = () => socket.close();
       socket.onclose = () => {
-        setConnection("Private session disconnected");
+        if (active) { setConnection("Private session disconnected"); }
         if (active && attempts++ < 10) {
           retry = setTimeout(connect, 2_000);
         }
@@ -571,7 +571,7 @@ function PriceTrace({ events }: { events: MarketEvent[] }) {
 function ExecutionDetails({ order, events }: { order: SessionOrder; events: MarketEvent[] }) {
   return <div className="execution-details">
     {order.metrics ? <div className="execution-metrics"><Metric label="Fill rate" value={`${(Number(order.metrics.fill_rate) * 100).toFixed(0)}%`} /><Metric label="Average fill" value={formatPrice(order.metrics.average_fill_price)} /><Metric label="Spread cost" value={formatPrice(order.metrics.spread_cost)} /><Metric label="Latency impact" value={formatPrice(order.metrics.latency_impact)} /><Metric label="Time to fill" value={order.metrics.time_to_completion_ms === null ? "—" : `${order.metrics.time_to_completion_ms} ms`} /></div> : null}
-    <div className="transition-list">{order.transitions.map((transition) => { const event = events.find((item) => item.event_id === transition.triggering_event_id); return <div key={`${transition.state}-${transition.changed_at}`}><span className="transition-state">{transition.state}</span><span>{event ? `${event.event_type} ${event.event_id}` : "order submitted"}</span><time>{new Date(transition.changed_at).toLocaleTimeString()}</time></div>; })}</div>
+    <div className="transition-list">{order.transitions.map((transition) => { const event = events.find((item) => item.event_id === transition.triggering_event_id); return <div key={`${transition.state}-${transition.changed_at}`}><span className="transition-state">{transition.state}</span><span>{transition.reason ?? (event ? `${event.event_type} ${event.event_id}` : "order submitted")}</span><time>{new Date(transition.changed_at).toLocaleTimeString()}</time></div>; })}</div>
     <div className="fill-list">{order.fills.map((fill) => { const event = events.find((item) => item.event_id === fill.triggering_event_id); return <p className="fill-note" key={fill.fill_id}>Filled {fill.quantity} shares at {formatPrice(fill.price)} from event <code>{fill.triggering_event_id}</code>. {event ? `Quote: bid ${formatPrice(event.bid_price)} × ${event.bid_size}, ask ${formatPrice(event.ask_price)} × ${event.ask_size}.` : ""}</p>; })}</div>
   </div>;
 }

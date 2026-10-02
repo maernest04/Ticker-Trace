@@ -144,6 +144,7 @@ class OrderStateChange(BaseModel):
     state: OrderState
     changed_at: datetime
     triggering_event_id: str | None = Field(default=None, min_length=1, max_length=128)
+    reason: str | None = None
 
     @field_validator("changed_at")
     @classmethod

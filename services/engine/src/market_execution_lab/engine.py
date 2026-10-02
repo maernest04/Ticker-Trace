@@ -158,6 +158,14 @@ class ExecutionEngine:
             )
         )
 
+    def cancel(self, changed_at: datetime, reason: str) -> ExecutionResult:
+        if self._state not in {OrderState.FILLED, OrderState.CANCELLED}:
+            self._state = OrderState.CANCELLED
+            self._transitions.append(OrderStateChange(order_id=self.order.order_id, state=self._state,
+                                                      changed_at=max(changed_at, self._transitions[-1].changed_at), reason=reason))
+            self._final_result = self.snapshot()
+        return self.snapshot()
+
     def finalize(self) -> ExecutionResult:
         if self._final_result is not None:
             return self._final_result

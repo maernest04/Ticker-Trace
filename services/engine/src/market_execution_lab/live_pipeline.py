@@ -30,7 +30,7 @@ LIVE_STALE_SECONDS = 15
 LIVE_MAX_ORDERS = 256
 
 
-def initialize_session(redis: Redis, run_id: UUID, symbols: list[str], register: bool = True) -> None:
+def initialize_session(redis: Redis, run_id: UUID, symbols: list[str], register: bool = True, scenario_name: str | None = None) -> None:
     started_at = datetime.now(UTC).isoformat()
     for partition in range(PARTITION_COUNT):
         stream = partition_stream_name(str(run_id), partition)
@@ -39,11 +39,11 @@ def initialize_session(redis: Redis, run_id: UUID, symbols: list[str], register:
         _ensure_group(redis, result_stream_name(str(run_id), partition), PERSISTENCE_GROUP)
         if redis.xlen(stream) == 0:
             redis.xadd(stream, {"message_type": "replay.started.v1", "payload": json.dumps({
-                "scenario_name": "private_live" if register else "continuous_benchmark_v1", "started_at": started_at,
+                "scenario_name": scenario_name or ("private_live" if register else "continuous_benchmark_v1"), "started_at": started_at,
                 "mode": "private_live", "symbols": symbols,
             })})
     if register:
-        redis.hset(LIVE_SESSION_KEY, mapping={"run_id": str(run_id), "symbols": json.dumps(symbols), "status": "connecting", "received_at": "0"})
+        redis.hset(LIVE_SESSION_KEY, mapping={"run_id": str(run_id), "symbols": json.dumps(symbols), "status": "connecting", "phase": "running", "started_at": str(time()), "received_at": "0"})
 
 
 def live_backlog(redis: Redis, stream: str) -> int:
@@ -101,11 +101,19 @@ class LiveEngine:
                 _apply_event_to_market_state(state, event)
                 cache_market_state(self.redis, market_state_key(str(self.run_id), event.symbol), state, event)
             for order_id, engine in self.engines.items():
-                if engine.order.symbol != event.symbol or engine.state == OrderState.FILLED:
+                if engine.order.symbol != event.symbol or engine.state in {OrderState.FILLED, OrderState.CANCELLED}:
                     continue
                 previous = (engine.state, engine.remaining_quantity)
                 engine.process(event)
                 if previous != (engine.state, engine.remaining_quantity):
+                    changed.add(order_id)
+        elif message["message_type"] == "session.closed.v1":
+            payload = json.loads(message["payload"])
+            if UUID(payload["run_id"]) != self.run_id:
+                raise ValueError("closure belongs to another live session")
+            for order_id, engine in self.engines.items():
+                if engine.state not in {OrderState.FILLED, OrderState.CANCELLED}:
+                    engine.cancel(datetime.fromisoformat(payload["closed_at"]), payload["reason"])
                     changed.add(order_id)
         elif message["message_type"] != "replay.started.v1":
             raise ValueError("unsupported live message type")
@@ -162,12 +170,12 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
             if message["message_type"] == "replay.started.v1":
                 payload = json.loads(message["payload"])
                 store.create_run(run_id, payload["scenario_name"], datetime.fromisoformat(payload["started_at"]))
-                store.record_replay_settings(run_id, "private_live", payload["symbols"])
+                store.record_replay_settings(run_id, "private_live", payload["symbols"], overwrite=False)
             elif message["message_type"] == "order.command.v1":
                 store.record_order(OrderCommand.model_validate_json(message["payload"]))
             elif message["message_type"] == "market.event.v1":
                 events.append(event_from_json(message["payload"]))
-            else:
+            elif message["message_type"] != "session.closed.v1":
                 raise ValueError("unsupported live source message")
         except (KeyError, TypeError, ValueError) as error:
             _dead_letter(redis, run_id, partition, stream, PERSISTENCE_GROUP, entry_id, message, str(error))
@@ -206,24 +214,35 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
     return [(event.event_id, (persisted_at - event.ingested_at.timestamp()) * 1000) for event in events]
 
 
-def run_live_worker(redis: Redis, store: DatabaseStore | None, run_id: UUID, partitions: list[int], role: str, stop=None, on_persist=None, startup_timeout_seconds=0) -> None:
+class SessionChanged(Exception):
+    pass
+
+
+def run_live_worker(redis: Redis, store: DatabaseStore | None, run_id: UUID, partitions: list[int], role: str, stop=None, on_persist=None, startup_timeout_seconds=0, follow_session=False) -> None:
     stop = stop if stop is not None else Event()
     leases = [f"live:owner:{run_id}:{role}:{partition}" for partition in partitions]
     ownership = LiveOwnership(redis, leases, stop)
+    def check_owner(force=False):
+        ownership.check(force)
+        if follow_session and redis.hget(LIVE_SESSION_KEY, "run_id") != str(run_id):
+            raise SessionChanged()
     try:
         if not ownership.acquire(startup_timeout_seconds):
             return
-        engines = {partition: LiveEngine(redis, run_id, partition, ownership.check) for partition in partitions} if role == "engine" else {}
+        check_owner(force=True)
+        engines = {partition: LiveEngine(redis, run_id, partition, check_owner) for partition in partitions} if role == "engine" else {}
         log_event("live_worker_ready", role=role, run_id=str(run_id))
         while not stop.is_set():
             for partition in partitions:
-                ownership.check(force=True)
+                check_owner(force=True)
                 if role == "engine":
                     engines[partition].step(ownership.owner)
                 else:
-                    persisted = persist_live_batch(redis, store, run_id, partition, ownership.owner, check_owner=ownership.check)
+                    persisted = persist_live_batch(redis, store, run_id, partition, ownership.owner, check_owner=check_owner)
                     if on_persist:
                         on_persist(persisted)
+    except SessionChanged:
+        log_event("live_worker_session_changed", role=role, run_id=str(run_id))
     except InterruptedError:
         if not stop.is_set():
             raise
@@ -259,7 +278,14 @@ def main() -> None:
     stop = Event()
     previous_handlers = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
-        run_live_worker(redis, store, run_id, args.partitions, args.role, stop=stop, startup_timeout_seconds=args.startup_timeout_seconds)
+        while not stop.is_set():
+            run_live_worker(redis, store, run_id, args.partitions, args.role, stop=stop, startup_timeout_seconds=args.startup_timeout_seconds, follow_session=not args.run_id)
+            if args.run_id:
+                break
+            session_id = redis.hget(LIVE_SESSION_KEY, "run_id")
+            if not session_id:
+                raise RuntimeError("active live registry disappeared; restore ingestion before workers")
+            run_id = UUID(session_id)
     finally:
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)

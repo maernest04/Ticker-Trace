@@ -45,7 +45,8 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Add backend CLI pacing and continuous offered-load/backlog/durable-write latency validation.
 - [x] Verify actual private market-window fills against persisted subsequent IEX quotes and automatic same-session worker replacement.
 - [x] Complete Local A bounded lease retry, graceful cleanup, and reconstruction ownership renewal.
-- [ ] Complete Local B session lifecycle/retention, then Local C ten-minute certification at twice the measured live peak.
+- [x] Complete Local B coordinated session rollover and bounded closed-session retention, with generated-process acceptance tests.
+- [ ] Complete Local C market-window/suspension checks and ten-minute certification at twice the measured live peak.
 - [ ] Deferred cloud acceptance: redeployed concurrent-browser and 24-hour idle-provider-usage checks.
 
 ## Technology Stack
@@ -63,7 +64,7 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 
 ## Data Modes
 
-- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. Actual quote-linked fills and automatic same-session worker replacement were verified locally October 2; coordinated session recovery and sustained-rate certification remain pending. Generated adapter integration tests are separate from actual provider evidence.
+- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. Actual quote-linked fills and automatic same-session worker replacement were verified locally October 2. Coordinated rollover/retention and ingestion resume are implemented and tested with generated service processes; post-update actual-feed execution, physical suspension, and sustained-rate certification remain pending.
 - **Public demo mode:** nine generated datasets without vendor credentials. Fly demand dispatch finishes engine and persistence work before returning the completed snapshot; the browser animates the recorded trace. This is not live stock pricing or intermediate-worker streaming.
 
 ## Run the Execution Workspace
@@ -82,13 +83,13 @@ Copy `infra/.env.private.example` to ignored `infra/.env.private`, supply operat
 docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml up --build
 ```
 
-Open `http://localhost:3030`. The API binds to loopback on port 8030. Update up to ten symbols from the UI. A new session currently requires stopping ingestion and both workers, allowing old ownership leases to expire, starting ingestion, confirming the new session, and then starting both workers. Follow the [local runbook](docs/DEPLOYMENT.md#separate-private-live-stack), including the separate commands for the current `tickertrace-local` instance. Stop the private stack when finished; closing the browser alone does not stop it. Private endpoints have no authentication and must not be exposed to the internet; CORS is not access control.
+Open `http://localhost:3030`. The API binds to loopback on port 8030. Update up to ten symbols from the UI. Ingestion restart resumes the same recoverable session and durable subscriptions; workers and the UI follow coordinated session changes. Follow the [local runbook](docs/DEPLOYMENT.md#separate-private-live-stack), including commands for the current `tickertrace-local` instance. Stop the private stack when finished; closing the browser alone does not stop it. Private endpoints have no authentication and must not be exposed to the internet; CORS is not access control.
 
 Each order is an independent top-of-book experiment, not a shared-liquidity matching engine. Alpaca quote sizes are reported in round lots; this MVP converts them using a 100-share lot assumption. Use symbols with that lot size and verify units before experimenting with other securities. See [Alpaca's quote schema](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data).
 
-Private source history is capped at 100,000 messages per partition and 256 orders per session; it is not silently trimmed or expired during operation. Reaching capacity stops ingestion and requires an operator-started new session. Worker replacement reconstructs retained input; missing source history cannot be recovered from the cache alone.
+Private sessions roll after 30 minutes, 90,000 messages in a partition, or 240 orders by default, leaving headroom below the unchanged hard caps. Rollover blocks new orders, drains closing boundaries, preserves fills and explicitly cancels remainders, then activates one durable successor. Closed Redis history expires after a 15-minute recovery grace; non-triggering PostgreSQL events expire one hour after closure, and order/fill explanations after 24 hours. These are configurable retention settings, not disk-quota guarantees. Worker replacement reconstructs retained input; missing active source history fails closed. Use Compose `stop`/`start`, not `down`, to retain the existing Redis container's recovery data.
 
-October 2 actual IEX testing first exposed a surviving-lease startup failure. Local A now waits safely for expiry and releases owned leases on graceful shutdown. The upgraded workers recovered without a second restart; immediate execution and independent persistence restarts preserved the active session and unique quote-linked simulated fills. Unattended multi-session operation is not yet certified. See [the recorded live evidence](docs/PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
+October 2 actual IEX testing first exposed a surviving-lease startup failure, fixed by Local A. Local B then automatically closed the capped session, preserved all five quote-linked fills, and activated one successor that both workers followed. Its ingestion-container restart retained the run and subscriptions. The 120-test suite and production frontend build pass; three generated-feed rollovers run with unchanged worker PIDs. Multi-day operation, physical laptop suspension, and post-update fresh Alpaca execution are not yet certified. See [the recorded evidence](docs/PRE_PHASE_7.md).
 
 ## Evidence and Limitations
 

@@ -18,7 +18,8 @@ import uvicorn
 
 from market_execution_lab.alpaca import INGESTION_CONTROL_STREAM
 from market_execution_lab.fixtures import ScenarioFixture, replay_scenarios
-from market_execution_lab.live_pipeline import LIVE_SESSION_KEY, LIVE_STALE_SECONDS, LIVE_MAX_MESSAGES, LIVE_MAX_BACKLOG, LIVE_MAX_ORDERS, live_backlog
+from market_execution_lab.live_pipeline import LIVE_SESSION_KEY, LIVE_STALE_SECONDS, LIVE_MAX_BACKLOG, live_backlog
+from market_execution_lab.live_sessions import LiveLimits
 from market_execution_lab.fly_workers import FlyWorkers
 from market_execution_lab.models import OrderCommand, OrderSide, OrderType, QuoteEvent, TradeEvent
 from market_execution_lab.observability import configure_logging, log_event, pipeline_metrics, request_id_context
@@ -83,6 +84,7 @@ class TransitionResponse(BaseModel):
     state: str
     changed_at: datetime
     triggering_event_id: str | None
+    reason: str | None = None
 
 
 class ExecutionMetricsResponse(BaseModel):
@@ -235,6 +237,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     workers = FlyWorkers() if os.getenv("FLY_WORKER_LIFECYCLE") == "on" else None
     if workers and mode == "private_live":
         raise ValueError("private live services must not use public Fly demand dispatch")
+    live_limits = LiveLimits.from_environment() if mode == "private_live" else None
 
     def live_session():
         if mode != "private_live":
@@ -248,18 +251,21 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     def live_status():
         session = live_session()
         symbols = json.loads(session["symbols"])
-        fresh = session["status"] == "connected" and time() - float(session["received_at"]) <= LIVE_STALE_SECONDS
+        fresh = session.get("phase", "running") == "running" and session["status"] == "connected" and time() - float(session["received_at"]) <= LIVE_STALE_SECONDS
         return {"run_id": session["run_id"], "symbols": symbols, "status": session["status"], "fresh": fresh,
                 "market": {symbol: redis.hgetall(market_state_key(session["run_id"], symbol)) for symbol in symbols}}
 
     @app.put("/api/v1/live/symbols")
     def live_symbols(request: WatchlistCommandRequest):
         session = live_session()
+        if session.get("phase", "running") != "running":
+            raise HTTPException(409, "session is closing; wait for automatic rollover")
         watchlist_id = UUID(session["run_id"])
         if not store.update_watchlist(watchlist_id, request.name, request.symbols):
             store.create_watchlist(watchlist_id, request.name, request.symbols, datetime.now(UTC))
         store.record_replay_settings(watchlist_id, "private_live", request.symbols)
-        _publish_watchlist_update(redis, UUID(session["run_id"]), request.symbols)
+        if not _publish_watchlist_update(redis, UUID(session["run_id"]), request.symbols, private=True):
+            raise HTTPException(409, "session changed while updating subscriptions; retry")
         return {"status": "requested", "symbols": request.symbols}
 
     def submit(queued: ScenarioFixture) -> int:
@@ -422,12 +428,15 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
                                    order_type=request.order_type, quantity=request.quantity, limit_price=request.limit_price,
                                    submitted_at=datetime.now(UTC), latency_ms=request.latency_ms)
             admitted = redis.eval(
+                "if redis.call('HGET', KEYS[3], 'run_id') ~= ARGV[4] or redis.call('HGET', KEYS[3], 'phase') ~= 'running' then return -1 end; "
                 "if redis.call('XLEN', KEYS[1]) >= tonumber(ARGV[1]) or tonumber(redis.call('GET', KEYS[2]) or '0') >= tonumber(ARGV[2]) then return 0 end; "
                 "redis.call('INCR', KEYS[2]); redis.call('XADD', KEYS[1], '*', 'message_type', 'order.command.v1', 'payload', ARGV[3]); return 1",
-                2, stream, f"live:orders:{session['run_id']}", LIVE_MAX_MESSAGES, LIVE_MAX_ORDERS, command.model_dump_json(),
+                3, stream, f"live:orders:{session['run_id']}", LIVE_SESSION_KEY, live_limits.messages, live_limits.orders, command.model_dump_json(), session["run_id"],
             )
+            if admitted == -1:
+                raise HTTPException(409, "session changed or is closing; wait for automatic rollover")
             if not admitted:
-                raise HTTPException(429, "live session capacity reached; start a new private session")
+                raise HTTPException(429, "live rollover threshold reached; wait for the next session")
             return QueuedReplayResponse(run_id=command.run_id, order_id=command.order_id, partition=partition, status="queued")
         if request.run_id is not None or request.scenario_name is None:
             raise HTTPException(422, "public orders require a generated replay scenario")
@@ -613,7 +622,9 @@ def _event_response(event: dict[str, object]) -> MarketEventResponse:
     )
 
 
-def _publish_watchlist_update(redis, watchlist_id: UUID, symbols: list[str]) -> None:
+def _publish_watchlist_update(redis, watchlist_id: UUID, symbols: list[str], private: bool = False):
+    if private:
+        return redis.eval("if redis.call('HGET', KEYS[1], 'run_id') ~= ARGV[1] or redis.call('HGET', KEYS[1], 'phase') ~= 'running' then return 0 end; redis.call('XADD', KEYS[2], 'MAXLEN', '256', '*', 'message_type', 'watchlist.updated.v1', 'watchlist_id', ARGV[1], 'symbols', ARGV[2]); return 1", 2, LIVE_SESSION_KEY, f"{INGESTION_CONTROL_STREAM}:{watchlist_id}", str(watchlist_id), json.dumps(symbols))
     redis.xadd(
         INGESTION_CONTROL_STREAM,
         {

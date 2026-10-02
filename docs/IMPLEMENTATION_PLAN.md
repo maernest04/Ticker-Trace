@@ -269,35 +269,36 @@ Verify:
 - [x] Replace execution and persistence independently against local generated input; assert unchanged fill IDs, quantities, and durable results.
 - [x] Repeat the real-feed test: fresh quote, simulated fill, immediate worker restart, post-recovery fill, and exactly one durable fill per fully filled small order.
 
-Acceptance passed October 2: worker entry points wait up to 45 seconds for the previous 30-second lease, then reconstruct retained input in 100-message batches with ownership checks and renewal. The startup deadline bounds acquisition, not reconstruction time. Library calls remain fail-fast by default. Graceful shutdown releases owned leases; abrupt process termination waits for expiry. Local engine/persistence use `on-failure:3` and a 20-second shutdown grace period; ingestion has no automatic restart policy. Tests cover SIGTERM/SIGKILL process replacement, slow reconstruction, partial acquisition, cancellation, and lost ownership. Real-feed replacement needed no second restart or manual lease cleanup; see `PRE_PHASE_7.md` for timings and durable quote-linked fills. Laptop/Docker suspension must fail safely; full session recovery after ingestion replacement is accepted in Local B.
+Acceptance passed October 2: worker entry points wait up to 45 seconds for the previous 30-second lease, then reconstruct retained input in 100-message batches with ownership checks and renewal. The startup deadline bounds acquisition, not reconstruction time. Library calls remain fail-fast by default. Graceful shutdown releases owned leases; abrupt process termination waits for expiry. Local engine/persistence use `on-failure:3` and a 20-second shutdown grace period; Part B adds the same bounded policy to ingestion, with fatal provider authentication exiting without restart. Tests cover SIGTERM/SIGKILL process replacement, slow reconstruction, partial acquisition, cancellation, and lost ownership. Real-feed replacement needed no second restart or manual lease cleanup; see `PRE_PHASE_7.md` for timings and durable quote-linked fills.
 
 ### Local B — Session Lifecycle and Bounded Retention
 
 Build:
 
-- [ ] Make the active-session registry authoritative and have workers follow session changes without processing the wrong run.
-- [ ] Resume a recoverable session after an ordinary ingestion restart; restore persisted subscriptions instead of silently reverting UI changes.
-- [ ] Coordinate session rollover before time, source-message, or order capacity is exhausted. Choose configurable thresholds from measured local traffic rather than merely raising the existing caps.
-- [ ] Stop new submissions during rollover, establish a closing event boundary, and drain engine/persistence work through that boundary.
-- [ ] Preserve partial fills and explicitly cancel any unfilled remainder with a session-ended reason; do not silently carry an order into a new experiment.
-- [ ] Activate the replacement session only after the old one is durably closed; reconnect the UI and workers automatically.
-- [ ] Expire closed-session source/result streams, caches, control history, and diagnostics only after completion and a recovery grace period. Do not trim active reconstruction history.
-- [ ] Prune old private raw events and session/order history in bounded batches; preserve triggering quotes for as long as their fill explanations are retained.
-- [ ] Document retention settings, disk growth, startup/stop commands, session reset behavior, and recovery limitations. Retention duration is an explicit operator setting, not an unmeasured quota guarantee.
+- [x] Make the active-session registry authoritative and have workers follow session changes without processing the wrong run.
+- [x] Resume a recoverable session after an ordinary ingestion restart; restore persisted subscriptions instead of silently reverting UI changes.
+- [x] Coordinate session rollover before time, source-message, or order capacity is exhausted. Choose configurable thresholds from measured local traffic rather than merely raising the existing caps.
+- [x] Stop new submissions during rollover, establish a closing event boundary, and drain engine/persistence work through that boundary.
+- [x] Preserve partial fills and explicitly cancel any unfilled remainder with a session-ended reason; do not silently carry an order into a new experiment.
+- [x] Activate the replacement session only after the old one is durably closed; reconnect the UI and workers automatically.
+- [x] Expire closed-session source/result streams, caches, control history, and diagnostics only after completion and a recovery grace period. Do not trim active reconstruction history.
+- [x] Prune old private raw events and session/order history in bounded batches; preserve triggering quotes for as long as their fill explanations are retained.
+- [x] Document retention settings, disk growth, startup/stop commands, session reset behavior, and recovery limitations. Retention duration is an explicit operator setting, not an unmeasured quota guarantee.
 
 Verify:
 
-- [ ] Force time/message/order rollover with small test thresholds while an order is partially filled.
-- [ ] Crash and retry each rollover stage; verify one active session, recoverable progress, and no duplicate fills or orphaned workers.
-- [ ] Restart ingestion and resume laptop/Docker operation; verify subscriptions, worker session IDs, freshness, and subsequent execution.
-- [ ] Verify cleanup preserves active/pending work, retained fill quotes, and unrelated public replay or benchmark records.
-- [ ] Run accelerated multiple-session tests and confirm Redis/PostgreSQL history stays within the configured retention bounds.
+- [x] Force time/message/order rollover with small test thresholds while an order is partially filled.
+- [x] Inject interruptions after durable intent, boundary publication, completion, successor initialization, and activation; retry safely with one successor and no duplicate fills.
+- [x] Restart ingestion and verify subscriptions, worker session IDs, freshness, and subsequent execution using generated-feed service processes; verify the same session survives an actual local ingestion-container restart.
+- [x] Verify cleanup preserves active/pending work, retained fill quotes, and unrelated replay or benchmark records.
+- [x] Run accelerated multiple-session tests and confirm Redis expiry and bounded PostgreSQL cleanup follow configured retention.
+- [ ] Physical laptop/Docker suspension and fresh actual-feed execution after Part B: repeat during an active market window. Observed sleep/wake cycles exhausted three lease-loss retries; explicit container start recovered. Unattended suspension recovery is not accepted.
 
-Acceptance: several consecutive sessions complete without manual restarts or lost explanations; closure and cleanup are idempotent, and active work is never deleted to enforce a storage cap.
+Implementation and generated acceptance passed: 120 total tests and the frontend build. Real service processes complete three generated-feed rollovers with unchanged worker PIDs; partial fills retain their IDs and the remainder closes as cancelled with reason `session ended`. The actual capped local session drained and activated one successor, preserving all five quote-linked fills. Defaults: 30-minute sessions, 90,000 messages per partition, 240 orders, 15-minute closed Redis grace, one-hour closed raw history, and 24-hour closed order/fill explanations. Thresholds leave headroom below unchanged hard caps; actual peak sizing remains Local C. Cleanup uses batches of at most 1,000 events/fills/transitions and one session per pass. Physical suspension and actual-feed freshness after this update remain separate unverified operational checks.
 
 ### Local C — Final Evidence and Presentation Readiness
 
-- [ ] Run the full Python suite and frontend production build after Local A/B changes.
+- [x] Run the full Python suite and frontend production build after Local A/B changes: 120 passed; production build passed.
 - [ ] Repeat the local browser workflow with actual quotes, parameterized simulated orders, reconnects, and stale-feed protection.
 - [ ] Measure a nonzero active-window peak for the documented symbol set.
 - [ ] Offer twice that measured rate for at least 600 seconds using isolated local generated load; retain offered-rate, active backlog, drain, latency, duplicate/loss, and error evidence.
@@ -315,7 +316,7 @@ Acceptance: reproducible local engineering and evidence are ready for Phase 7. C
 2. Local B lifecycle and retention → accelerated rollover/failure checks.
 3. Local C ten-minute evidence and documentation → Phase 7 presentation.
 
-Complete and verify each section before starting the next. Local A is implemented and verified; Local B and Local C remain pending.
+Local A/B are implemented with generated/local acceptance evidence. Local C and the explicit physical-suspension/market-window checks remain pending; do not claim those passed from process-level tests.
 
 ## Phase 7: Project Presentation
 

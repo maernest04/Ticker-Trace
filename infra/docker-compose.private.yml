@@ -32,10 +32,19 @@ services:
 
   ingestion:
     build: ..
+    restart: "on-failure:3"
+    stop_grace_period: 20s
     command: market-execution-ingestion
     environment:
       APP_MODE: private_live
       REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
+      LIVE_SESSION_SECONDS: ${LIVE_SESSION_SECONDS:-1800}
+      LIVE_MESSAGES: ${LIVE_MESSAGES:-90000}
+      LIVE_ORDERS: ${LIVE_ORDERS:-240}
+      LIVE_RECOVERY_SECONDS: ${LIVE_RECOVERY_SECONDS:-900}
+      LIVE_RAW_SECONDS: ${LIVE_RAW_SECONDS:-3600}
+      LIVE_HISTORY_SECONDS: ${LIVE_HISTORY_SECONDS:-86400}
       ALPACA_API_KEY: ${ALPACA_API_KEY:?set private Alpaca key}
       ALPACA_API_SECRET: ${ALPACA_API_SECRET:?set private Alpaca secret}
       ALPACA_SYMBOLS: ${ALPACA_SYMBOLS:-AAPL,MSFT}
@@ -75,6 +84,8 @@ services:
     command: market-execution-api
     environment:
       APP_MODE: private_live
+      LIVE_MESSAGES: ${LIVE_MESSAGES:-90000}
+      LIVE_ORDERS: ${LIVE_ORDERS:-240}
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
       PUBLIC_ALLOWED_ORIGINS: http://localhost:3030,http://127.0.0.1:3030

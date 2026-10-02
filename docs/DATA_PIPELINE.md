@@ -8,7 +8,7 @@ The sections below the historical-proposal heading describe initial intent, not 
 
 Pydantic quote/trade envelopes contain event ID, schema version, run ID, symbol, event/ingestion times, sequence, partition, and typed Decimal prices/whole-share quantities. Alpaca quotes report round lots; this MVP assumes 100 shares per lot, while trades already report shares. Verify symbol lot units before using other securities. Quote identifiers include timestamp, prices, and sizes to preserve liquidity-only changes.
 
-Stream messages currently use `replay.started.v1`, `order.command.v1`, `market.event.v1`, `replay.completed.v1`, and `execution.result.v1`. Fills/transitions are fields in result snapshots, not separate event channels. Malformed messages are dead-lettered.
+Stream messages currently use `replay.started.v1`, `order.command.v1`, `market.event.v1`, `replay.completed.v1`, `session.closed.v1`, and `execution.result.v1`. Private closing markers contain the run, closing time, and `session ended` reason. Fills/transitions are fields in result snapshots, not separate event channels. Malformed messages are dead-lettered.
 
 ### Public replay
 
@@ -24,16 +24,17 @@ Three versioned longer datasets each contain 240 quotes and 60 trades across abo
 
 1. Explicitly start one operator ingestion session, initialize partitions/groups, acquire ownership, and register run/symbol/connection status.
 2. Authenticate, subscribe, normalize, and publish real incoming quotes/trades. Reconnect transient disconnects with bounded backoff; fatal provider rejection stops the feed; invalid messages are skipped.
-3. Pause production when source consumer backlog reaches 10,000. Stop at 100,000 retained messages per partition rather than deleting recovery history.
+3. Pause production when source consumer backlog reaches 10,000. Coordinate rollover after 30 minutes, 90,000 partition messages, or 240 orders by default, before the unchanged hard caps.
 4. Continuous engine consumers process commands and subsequent quotes; each independent order emits progress snapshots on state/quantity changes.
 5. Continuous persistence commits batches and snapshots, retaining a running session and deterministic fill IDs.
 6. Private UI/API expose ongoing quotes, received/provider quote age, subscription controls, event trace, and durable fill explanations.
+7. Persist closing intent and a single successor; atomically block orders and append a boundary in each partition. Drain source/results, preserve fills, cancel unfilled remainders, commit closure, and only then activate the successor. Workers/UI follow the registry; fresh quotes are required before new orders.
 
-Live orders require the current `run_id`, no generated scenario, a subscribed symbol, and fresh provider/received quotes plus a connected feed within 15 seconds. Public orders require a generated scenario. Subscription changes are validated/persisted and sent through `ingestion.control` without environment edits.
+Live orders require the current `run_id`, no generated scenario, a subscribed symbol, and fresh provider/received quotes plus a connected feed within 15 seconds. Admission rechecks run/phase atomically with enqueueing. Public orders require a generated scenario. Private subscription changes are durably persisted and sent through bounded per-session `ingestion.control:<run_id>` streams; ordinary ingestion restart restores durable desired symbols instead of environment defaults.
 
 ### Recovery, metrics, and limits
 
-Market/order hashes retain their legacy `state:replay`/`order:replay` names but isolate live data by run UUID. PostgreSQL stores durable events/results; benchmark JSON stays outside the database. Private streams are bounded, retained operator history; public TTL/pruning does not delete them. Restart ingestion and both workers together to change sessions; stop private operation when finished.
+Market/order hashes retain their legacy `state:replay`/`order:replay` names but isolate live data by run UUID. PostgreSQL stores durable events/results/lifecycle rows; benchmark JSON stays outside the database. Active/closing source history is never trimmed for retention. Completed private Redis data expires after its recovery grace; batched SQL pruning preserves triggering quotes until retained order/fill history expires. Public TTL/pruning remains separate. Rollover and ingestion resume are automatic with retained history; missing required history fails closed. Stop private operation when finished; closing a browser is not shutdown.
 
 Metrics include weighted fill price, fill rate, signed spread cost in currency per share, activation-to-fill times, and replay latency impact. Zero values remain zero. No separate brokerage-slippage, fee, basis-point spread, or market-impact model is implemented. Continuous certification samples active source/result backlog and event enqueue-to-durable-write latency; public tiny-fixture rates are not capacity evidence.
 

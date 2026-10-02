@@ -274,17 +274,17 @@ docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml
 
 Private frontend: `http://localhost:3030`; API: `http://localhost:8030`. The frontend uses compile-time API origins. `localhost` is the supported private-browser origin; a browser resolving it outside this machine cannot connect. No authentication exists: never publish these ports or depend on CORS for security.
 
-Ingestion initializes the session registry; live worker processes wait up to 30 seconds for it. The UI can change up to ten symbols without changing environment files. Source history is bounded at 100,000 messages per partition and orders at 256 per session. The MVP assumes 100 shares per quote round lot; verify stock units before use. Automatic coordinated session rollover and private retention are not implemented.
+Ingestion resumes the registry's recoverable session and durable subscriptions; workers wait up to 30 seconds for the registry and follow its session changes automatically. The UI can change up to ten symbols without environment edits. Hard caps remain 100,000 source messages per partition and 256 orders, but rollover occurs earlier by default. The MVP assumes 100 shares per quote round lot; verify stock units before use.
 
-For the current implementation, starting a new session requires stopping ingestion and both workers, waiting for any old ingestion lease to expire (up to 30 seconds), starting ingestion, confirming a new session is registered, and only then starting engine/persistence. Do not restart the three services concurrently and assume workers attach to the new session. For the isolated env-file setup:
+Sessions roll automatically: block admissions atomically, publish one closing boundary per partition, drain source/results, preserve fills and cancel remaining quantities with `session ended`, commit closure, then activate the recorded successor. Ingestion restart resumes this sequence instead of abandoning its run. A restart is not a manual session reset. For ordinary restart and stop/resume:
 
 ```bash
-docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop ingestion engine persistence
-docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start ingestion
-docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start engine persistence
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml restart ingestion
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop
+docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start
 ```
 
-Perform the new-session checks between the commands above. Updated ingestion releases its owned lease on graceful shutdown; older images or abrupt termination still require expiry. Execution/persistence replacement within the same session now waits up to 45 seconds for an occupied 30-second lease, without deleting another owner's keys. Graceful worker shutdown releases only owned leases. Reconstruction renews ownership and stops on loss; its duration is additional to the acquisition timeout. Do not restart ingestion when replacing only a worker. Local Compose workers use `restart: on-failure:3` and a 20-second shutdown grace period. Fatal Alpaca authentication is not automatically retried. An intentional `docker stop` or `docker kill` suppresses Docker's restart policy; use `start` after an intentional stop. The old manual second-restart workaround is no longer needed for same-session worker replacement.
+Ingestion and workers wait up to 45 seconds for an occupied 30-second lease without deleting another owner's keys. Graceful shutdown releases only owned leases; reconstruction renews ownership and stops on loss. Its duration is additional to the acquisition timeout. All three local live processes use `restart: on-failure:3` and a 20-second shutdown grace period. Fatal provider authentication/subscription rejection logs a fatal event and exits without an automatic restart; fix credentials/subscriptions and explicitly start ingestion. Intentional `docker stop` or `docker kill` suppresses Docker's restart policy; use `start` afterward. Workers started with an explicit `--run-id` stay pinned for diagnostics; normal Compose workers follow the registry.
 
 Stop the private stack when finished; continuous ingestion intentionally consumes resources and does not share the public idle lifecycle:
 
@@ -292,7 +292,20 @@ Stop the private stack when finished; continuous ingestion intentionally consume
 docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml stop
 ```
 
-Private history remains in its database/Redis until the operator handles retention. The public prune policy excludes it. No automatic destructive private cleanup is introduced.
+### Local retention settings
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `LIVE_SESSION_SECONDS` | 1800 | Close after 30 minutes, even if the feed is quiet. |
+| `LIVE_MESSAGES` | 90000 | Close before the unchanged 100,000-message partition cap. |
+| `LIVE_ORDERS` | 240 | Close before the unchanged 256-order session cap. |
+| `LIVE_RECOVERY_SECONDS` | 900 | Closed Redis streams/caches/control/diagnostics expire after a 15-minute recovery grace. |
+| `LIVE_RAW_SECONDS` | 3600 | Prune non-triggering raw events one hour after durable session closure. |
+| `LIVE_HISTORY_SECONDS` | 86400 | Expire closed orders, fills, transitions, settings, and sessions after 24 hours. Triggering quotes remain until this history expires. |
+
+Retention runs during ingestion at startup/once per minute, in bounded database batches: at most 1,000 rows each from events/fills/transitions and one fully emptied session per pass. Redis expiration is recorded durably and does not extend existing TTLs on retry. Only lifecycle-registered, completed private sessions are eligible; active/closing work, public replays, and unregistered benchmarks are excluded. Legacy shared `ingestion.control` is left untouched; new private controls are per-session and capped at 256 entries. Timed rollover reconnects Alpaca and may miss events during the gap; the UI disables orders until a new fresh quote arrives.
+
+These settings intentionally remove expired private history; export needed evidence before its retention deadline. They bound retention age/batch work, not an exact disk quota or immediate catch-up after a long shutdown. Disk growth depends on traffic, event size, trigger-quote density, and cleanup capacity; PostgreSQL can reuse freed space without shrinking its volume. During dependency failures the system preserves pending data and blocks rollover rather than deleting active work. Closing the browser does not stop any service.
 
 ### Current Laptop Instance
 
@@ -303,7 +316,9 @@ POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertra
 POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml stop
 ```
 
-Use the same project name, env source, and local database password when starting this instance again. `stop` retains containers and database data. Do not use `down --volumes` to stop normal operation. After startup, verify registry/session IDs and all three live processes rather than assuming container start implies successful recovery. A fresh dedicated ignored env file remains the recommended reproducible setup for another laptop.
+Use the same project name, env source, and local database password when starting this instance again. `stop` retains containers and database data. Do not use `down` or `down --volumes` for normal shutdown: Redis recovery history lives in its existing container, not a configured durable volume. If required active source history is missing, startup fails closed; restoring PostgreSQL alone cannot reconstruct the stream. A destroyed Redis container needs restoration/operator recovery, not automatic fresh-session abandonment. After startup, verify registry/session IDs and all three live processes rather than assuming container start implies successful recovery. A fresh dedicated ignored env file remains the recommended reproducible setup for another laptop.
+
+Repeated laptop sleep/dark-wake cycles exhausted the three automatic lease-loss retries during the October 2 check. Explicit container start restored processing and completed the expired session; unattended suspension recovery is not guaranteed. Stop the stack before prolonged laptop sleep and start it on return. After schema/image changes, rebuild and recreate the migration container too: an old container cannot recognize a newer migration even if PostgreSQL has already been upgraded.
 
 ## Pre-Phase 7 External Acceptance Record
 

@@ -74,6 +74,7 @@ def test_slow_reconstruction_renews_real_leases(monkeypatch):
 @pytest.mark.parametrize("replace_owner", [False, True])
 def test_ingestion_sigterm_releases_only_its_own_lease(replace_owner):
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    redis.delete(LIVE_SESSION_KEY)
     run_id = uuid4()
     script = "import asyncio; from market_execution_lab import ingestion_service as service\nasync def stream(*args):\n    await asyncio.Future()\nservice.stream_alpaca = stream\nservice.main()"
     environment = {**os.environ, "APP_MODE": "private_live", "ALPACA_API_KEY": "test-key", "ALPACA_API_SECRET": "test-secret", "ALPACA_SYMBOLS": "AAPL"}
@@ -101,6 +102,7 @@ def test_ingestion_sigterm_releases_only_its_own_lease(replace_owner):
             process.terminate()
             process.wait(timeout=10)
         redis.delete("live:ingestion-owner")
+        redis.delete(LIVE_SESSION_KEY)
 
 
 @pytest.mark.parametrize("role", ["engine", "persistence"])
@@ -228,7 +230,7 @@ def test_private_live_order_uses_subsequent_alpaca_quote_and_survives_replacemen
         assert client.post("/api/v1/orders", json={"run_id": str(run_id), "symbol": "AAPL", "side": "buy", "order_type": "market", "quantity": 50}).status_code == 409
         assert client.post("/api/v1/orders", json={"run_id": str(run_id), "symbol": "MSFT", "side": "buy", "order_type": "market", "quantity": 50}).status_code == 422
         assert client.put("/api/v1/live/symbols", json={"name": "Live", "symbols": ["AAPL", "NVDA"]}).status_code == 200
-        assert json.loads(redis.xrange("ingestion.control")[-1][1]["symbols"]) == ["AAPL", "NVDA"]
+        assert json.loads(redis.xrange(f"ingestion.control:{run_id}")[-1][1]["symbols"]) == ["AAPL", "NVDA"]
     monkeypatch.setenv("APP_MODE", "public_replay")
     monkeypatch.delenv("ALPACA_API_KEY", raising=False)
     monkeypatch.delenv("ALPACA_API_SECRET", raising=False)

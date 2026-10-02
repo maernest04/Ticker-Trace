@@ -16,14 +16,15 @@ The continuous acceptance test offers generated input independently of consumers
 
 ## Current Local-First Acceptance
 
-Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). Local A is implemented; B/C remain planned.
+Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). Local A/B are implemented; Local C and explicit operational checks remain.
 
 - [x] Local A: immediate restart waits safely for an unexpired old lease and resumes without manual retry; a competing healthy owner is never displaced.
 - [x] Local A: partial ownership acquisition, graceful/abrupt termination, slow reconstruction, and lost ownership preserve exclusivity and idempotent fills.
 - [x] Local A: execution and persistence replacements recover independently; repeat the actual provider-linked browser test after the fix.
-- [ ] Local B: ingestion restart restores the same recoverable session and subscriptions; laptop/Docker suspension does not orphan workers on the wrong session.
-- [ ] Local B: forced rollover closes partial orders explicitly, drains source/results, and activates exactly one replacement session.
-- [ ] Local B: retries at each rollover stage are safe; bounded cleanup preserves active/pending work, retained triggering quotes, and unrelated records.
+- [x] Local B: generated-feed ingestion restart restores the same session/subscriptions, fresh quotes, and execution; actual local container restart retains the successor registry/run.
+- [x] Local B: forced time/message/order rollover closes partial orders explicitly, drains source/results, and activates exactly one replacement session.
+- [x] Local B: retries at five injected rollover interruptions are safe; bounded cleanup preserves active work, retained triggering quotes, and unrelated benchmark records.
+- [ ] Unattended physical suspension recovery and a fresh actual-feed post-update simulation remain unverified. Observed laptop sleep/wake cycles exhausted the bounded lease-loss retries; explicit container start recovered and rolled over the expired session.
 - [ ] Local C: run the full suite and frontend production build, measure a nonzero real feed peak, then offer twice that rate for at least 600 seconds using isolated local generated load.
 - [ ] Local C: record workload/environment details, screenshot permissions, and verified shutdown behavior before publishing final claims.
 
@@ -32,6 +33,8 @@ October 2 manual actual-feed smoke: two five-share AAPL orders filled at 332.89 
 After Local A: 106 Python tests passed against isolated Redis/PostgreSQL, and the Next.js production build passed. New coverage includes deterministic retry deadlines/cancellation, compare-and-delete ownership, real lease expiry/loss, reconstruction lasting longer than its two-second test lease, ingestion SIGTERM cleanup without touching a replacement owner/session, and independent worker SIGTERM/SIGKILL replacements preserving fill IDs. The subprocess crash tests shorten only isolated test leases to one second; production leases remain 30 seconds. Actual-feed graceful replacement and surviving-old-lease upgrade were verified separately, with quote-linked MSFT fills. This does not certify multi-day operation, laptop suspension recovery, or crash-fencing of an already-running database operation. Cloud concurrency, rollback, and 24-hour usage checks remain deferred.
 
 ## Testing Goals
+
+Local B result: **120 passed** against isolated Redis/PostgreSQL, Next.js production build passed, and local container images built. `tests/test_live_sessions.py` covers limits/headroom, all three rollover triggers with partial fills, cancellation regression protection, durable intent/boundary/completion/initialization/activation interruptions, retained subscriptions, missing-history fail-closed behavior, per-batch SQL cleanup and Redis expiry, admission/closure races, and worker registry following. Actual service subprocesses with a generated feed complete three rollovers with unchanged worker PIDs and one retained quote-linked fill. These are exception/process tests, not a physical laptop suspension or measured capacity test. The actual capped local session also closed and activated a successor while preserving five existing fills; after-hours quotes were unavailable, so no fresh provider-fill claim is made for this update.
 
 - Prove domain-state correctness under concurrent processing.
 - Verify behavior when events are duplicated, delayed, or reordered.
