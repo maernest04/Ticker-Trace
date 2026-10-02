@@ -1,6 +1,8 @@
 import argparse
 import json
 import os
+import signal
+from threading import Event
 from datetime import UTC, datetime
 from time import sleep, time
 from uuid import UUID, uuid4
@@ -18,6 +20,7 @@ from market_execution_lab.pipeline import (
 from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 from market_execution_lab.streaming import cache_market_state, cache_order_state, event_from_json, market_state_key, order_state_key, partition_stream_name
 from market_execution_lab.observability import configure_logging, log_event
+from market_execution_lab.live_ownership import LiveOwnership
 
 
 LIVE_SESSION_KEY = "live:session"
@@ -56,20 +59,31 @@ def append_live(redis, stream: str, message: dict[str, str]):
 
 
 class LiveEngine:
-    def __init__(self, redis: Redis, run_id: UUID, partition: int):
+    def __init__(self, redis: Redis, run_id: UUID, partition: int, check_owner=None):
         self.redis, self.run_id, self.partition = redis, run_id, partition
+        self.check_owner = check_owner
         self.stream = partition_stream_name(str(run_id), partition)
         self.engines: dict[UUID, ExecutionEngine] = {}
         self.markets: dict[str, MarketState] = {}
         _ensure_group(redis, self.stream, ENGINE_GROUP)
         group = next(group for group in redis.xinfo_groups(self.stream) if group["name"] == ENGINE_GROUP)
-        for _, message in redis.xrange(self.stream, max=group["last-delivered-id"]):
-            try:
-                self.process(message)
-            except (KeyError, TypeError, ValueError):
-                pass
+        cursor = "-"
+        while True:
+            if self.check_owner:
+                self.check_owner(force=True)
+            entries = redis.xrange(self.stream, min=cursor, max=group["last-delivered-id"], count=100)
+            if not entries:
+                break
+            for entry_id, message in entries:
+                try:
+                    self.process(message)
+                except (KeyError, TypeError, ValueError):
+                    pass
+            cursor = f"({entries[-1][0]}"
 
     def process(self, message: dict[str, str]) -> set[UUID]:
+        if self.check_owner:
+            self.check_owner()
         changed = set()
         if message["message_type"] == "order.command.v1":
             order = OrderCommand.model_validate_json(message["payload"])
@@ -98,6 +112,8 @@ class LiveEngine:
         return changed
 
     def step(self, consumer: str, block_ms: int = 100) -> int:
+        if self.check_owner:
+            self.check_owner(force=True)
         claimed, exhausted = _claim_pending(self.redis, self.stream, ENGINE_GROUP, consumer, 1000, 3)
         for entry_id, message in exhausted:
             _dead_letter(self.redis, self.run_id, self.partition, self.stream, ENGINE_GROUP, entry_id, message, "delivery limit reached")
@@ -111,6 +127,8 @@ class LiveEngine:
             except (KeyError, TypeError, ValueError) as error:
                 _dead_letter(self.redis, self.run_id, self.partition, self.stream, ENGINE_GROUP, entry_id, message, str(error))
         for order_id in changed:
+            if self.check_owner:
+                self.check_owner()
             engine = self.engines[order_id]
             result = engine.snapshot()
             cache_order_state(self.redis, order_state_key(str(self.run_id), str(order_id)), result)
@@ -119,11 +137,15 @@ class LiveEngine:
                 "result": json.dumps(_result_payload(result)),
             })
         if entries:
+            if self.check_owner:
+                self.check_owner(force=True)
             self.redis.xack(self.stream, ENGINE_GROUP, *(entry_id for entry_id, _ in entries))
         return len(entries)
 
 
-def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partition: int, consumer: str, block_ms: int = 100) -> list[tuple[str, float]]:
+def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partition: int, consumer: str, block_ms: int = 100, check_owner=None) -> list[tuple[str, float]]:
+    if check_owner:
+        check_owner(force=True)
     stream = partition_stream_name(str(run_id), partition)
     _ensure_group(redis, stream, PERSISTENCE_GROUP)
     claimed, exhausted = _claim_pending(redis, stream, PERSISTENCE_GROUP, consumer, 1000, 3)
@@ -134,6 +156,8 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
         _dead_letter(redis, run_id, partition, stream, PERSISTENCE_GROUP, entry_id, message, "delivery limit reached")
         redis.xack(stream, PERSISTENCE_GROUP, entry_id)
     for entry_id, message in entries:
+        if check_owner:
+            check_owner()
         try:
             if message["message_type"] == "replay.started.v1":
                 payload = json.loads(message["payload"])
@@ -147,9 +171,13 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
                 raise ValueError("unsupported live source message")
         except (KeyError, TypeError, ValueError) as error:
             _dead_letter(redis, run_id, partition, stream, PERSISTENCE_GROUP, entry_id, message, str(error))
+    if check_owner:
+        check_owner(force=True)
     store.record_events(events)
     persisted_at = time()
     if entries:
+        if check_owner:
+            check_owner(force=True)
         redis.xack(stream, PERSISTENCE_GROUP, *(entry_id for entry_id, _ in entries))
     results = result_stream_name(str(run_id), partition)
     _ensure_group(redis, results, PERSISTENCE_GROUP)
@@ -159,6 +187,8 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
         _dead_letter(redis, run_id, partition, results, PERSISTENCE_GROUP, entry_id, message, "delivery limit reached")
         redis.xack(results, PERSISTENCE_GROUP, entry_id)
     for entry_id, message in pending + [entry for _, batch in fresh for entry in batch]:
+        if check_owner:
+            check_owner(force=True)
         try:
             order = OrderCommand.model_validate_json(message["order"])
             result = _result_from_payload(json.loads(message["result"]))
@@ -170,34 +200,36 @@ def persist_live_batch(redis: Redis, store: DatabaseStore, run_id: UUID, partiti
             continue
         store.record_order(order)
         store.complete_run(order, result, datetime.now(UTC), final=False)
+        if check_owner:
+            check_owner(force=True)
         redis.xack(results, PERSISTENCE_GROUP, entry_id)
     return [(event.event_id, (persisted_at - event.ingested_at.timestamp()) * 1000) for event in events]
 
 
-def run_live_worker(redis: Redis, store: DatabaseStore | None, run_id: UUID, partitions: list[int], role: str, stop=None, on_persist=None) -> None:
-    owner = str(uuid4())
+def run_live_worker(redis: Redis, store: DatabaseStore | None, run_id: UUID, partitions: list[int], role: str, stop=None, on_persist=None, startup_timeout_seconds=0) -> None:
+    stop = stop if stop is not None else Event()
     leases = [f"live:owner:{run_id}:{role}:{partition}" for partition in partitions]
-    acquired = []
+    ownership = LiveOwnership(redis, leases, stop)
     try:
-        for key in leases:
-            if not redis.set(key, owner, nx=True, ex=30):
-                raise RuntimeError("live partition already has an owner")
-            acquired.append(key)
-        engines = {partition: LiveEngine(redis, run_id, partition) for partition in partitions} if role == "engine" else {}
-        while stop is None or not stop.is_set():
-            for key in leases:
-                if not redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], 30) end; return 0", 1, key, owner):
-                    raise RuntimeError("live partition ownership lost")
+        if not ownership.acquire(startup_timeout_seconds):
+            return
+        engines = {partition: LiveEngine(redis, run_id, partition, ownership.check) for partition in partitions} if role == "engine" else {}
+        log_event("live_worker_ready", role=role, run_id=str(run_id))
+        while not stop.is_set():
             for partition in partitions:
+                ownership.check(force=True)
                 if role == "engine":
-                    engines[partition].step(owner)
+                    engines[partition].step(ownership.owner)
                 else:
-                    persisted = persist_live_batch(redis, store, run_id, partition, owner)
+                    persisted = persist_live_batch(redis, store, run_id, partition, ownership.owner, check_owner=ownership.check)
                     if on_persist:
                         on_persist(persisted)
+    except InterruptedError:
+        if not stop.is_set():
+            raise
     finally:
-        for key in acquired:
-            redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0", 1, key, owner)
+        ownership.release()
+        log_event("live_worker_stopped", role=role, run_id=str(run_id))
 
 
 def main() -> None:
@@ -206,8 +238,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--role", choices=["engine", "persistence"], required=True)
     parser.add_argument("--run-id", type=UUID)
+    parser.add_argument("--startup-timeout-seconds", type=float, default=45)
     parser.add_argument("--partitions", type=int, nargs="+", default=list(range(PARTITION_COUNT)))
     args = parser.parse_args()
+    if args.startup_timeout_seconds < 0:
+        parser.error("startup timeout must be nonnegative")
     if not args.partitions or any(partition not in range(PARTITION_COUNT) for partition in args.partitions) or len(set(args.partitions)) != len(args.partitions):
         parser.error("partitions must be unique values between 0 and 15")
     redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True, socket_timeout=10)
@@ -221,7 +256,14 @@ def main() -> None:
     run_id = args.run_id or UUID(session_id)
     store = DatabaseStore(sa.create_engine(sqlalchemy_url(os.environ["DATABASE_URL"]))) if args.role == "persistence" else None
     log_event("live_worker_started", role=args.role, run_id=str(run_id), partitions=args.partitions)
-    run_live_worker(redis, store, run_id, args.partitions, args.role)
+    stop = Event()
+    previous_handlers = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        run_live_worker(redis, store, run_id, args.partitions, args.role, stop=stop, startup_timeout_seconds=args.startup_timeout_seconds)
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
+        redis.close()
 
 
 if __name__ == "__main__":

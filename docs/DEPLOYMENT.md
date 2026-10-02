@@ -284,7 +284,7 @@ docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml
 docker compose --env-file infra/.env.private -f infra/docker-compose.private.yml start engine persistence
 ```
 
-Perform the wait and new-session checks between the commands above. If replacing only an execution or persistence worker within the same session, a surviving 30-second ownership lease can cause the first restart to exit. Wait for expiry and retry the worker without restarting ingestion or deleting another owner's lease. This workaround was required in the October 2 live test; automatic retry is planned in Local A.
+Perform the new-session checks between the commands above. Updated ingestion releases its owned lease on graceful shutdown; older images or abrupt termination still require expiry. Execution/persistence replacement within the same session now waits up to 45 seconds for an occupied 30-second lease, without deleting another owner's keys. Graceful worker shutdown releases only owned leases. Reconstruction renews ownership and stops on loss; its duration is additional to the acquisition timeout. Do not restart ingestion when replacing only a worker. Local Compose workers use `restart: on-failure:3` and a 20-second shutdown grace period. Fatal Alpaca authentication is not automatically retried. An intentional `docker stop` or `docker kill` suppresses Docker's restart policy; use `start` after an intentional stop. The old manual second-restart workaround is no longer needed for same-session worker replacement.
 
 Stop the private stack when finished; continuous ingestion intentionally consumes resources and does not share the public idle lifecycle:
 
@@ -311,7 +311,7 @@ The real local feed smoke test is recorded below. Remaining cloud checks are def
 
 | Check | Evidence to record | Status |
 | --- | --- | --- |
-| Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Verified locally October 2; manual recovery only, see PRE_PHASE_7.md |
+| Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Verified locally October 2, including automatic same-session worker replacement; see PRE_PHASE_7.md |
 | Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Pending Local C |
 | New public browser workflow | Deployed backend/frontend versions; 300-event experiment, parameter comparison, final persisted result | Deferred cloud acceptance |
 | Five concurrent submissions | Five outcomes; exact one machine per worker group; no extra/spare machines | Deferred cloud acceptance |

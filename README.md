@@ -43,8 +43,9 @@ The system is an educational and research simulator. It does not place real orde
 - [x] Connect private session order submission, continuous workers, quote freshness, subscription controls, and a private live UI.
 - [x] Add three versioned 300-event public experiments alongside the six small regression fixtures.
 - [x] Add backend CLI pacing and continuous offered-load/backlog/durable-write latency validation.
-- [x] Verify actual private market-window fills against persisted subsequent IEX quotes; manual recovery tested October 2.
-- [ ] Complete Local A/B automatic recovery and session lifecycle/retention, then Local C ten-minute certification at twice the measured live peak.
+- [x] Verify actual private market-window fills against persisted subsequent IEX quotes and automatic same-session worker replacement.
+- [x] Complete Local A bounded lease retry, graceful cleanup, and reconstruction ownership renewal.
+- [ ] Complete Local B session lifecycle/retention, then Local C ten-minute certification at twice the measured live peak.
 - [ ] Deferred cloud acceptance: redeployed concurrent-browser and 24-hour idle-provider-usage checks.
 
 ## Technology Stack
@@ -62,7 +63,7 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 
 ## Data Modes
 
-- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. Actual quote-linked fills were verified locally October 2; automatic recovery and sustained-rate certification remain pending. Generated adapter integration tests are separate from actual provider evidence.
+- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. Actual quote-linked fills and automatic same-session worker replacement were verified locally October 2; coordinated session recovery and sustained-rate certification remain pending. Generated adapter integration tests are separate from actual provider evidence.
 - **Public demo mode:** nine generated datasets without vendor credentials. Fly demand dispatch finishes engine and persistence work before returning the completed snapshot; the browser animates the recorded trace. This is not live stock pricing or intermediate-worker streaming.
 
 ## Run the Execution Workspace
@@ -87,7 +88,7 @@ Each order is an independent top-of-book experiment, not a shared-liquidity matc
 
 Private source history is capped at 100,000 messages per partition and 256 orders per session; it is not silently trimmed or expired during operation. Reaching capacity stops ingestion and requires an operator-started new session. Worker replacement reconstructs retained input; missing source history cannot be recovered from the cache alone.
 
-October 2 actual IEX testing verified two five-share AAPL simulated fills against their persisted subsequent quotes, with one fill row per order. Immediate worker restart exposed a surviving-lease startup failure; manual retry after lease expiry recovered. Automatic recovery and unattended multi-session operation are not yet certified. See [the recorded live evidence](docs/PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
+October 2 actual IEX testing first exposed a surviving-lease startup failure. Local A now waits safely for expiry and releases owned leases on graceful shutdown. The upgraded workers recovered without a second restart; immediate execution and independent persistence restarts preserved the active session and unique quote-linked simulated fills. Unattended multi-session operation is not yet certified. See [the recorded live evidence](docs/PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
 
 ## Evidence and Limitations
 

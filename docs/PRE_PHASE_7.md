@@ -108,4 +108,27 @@ Session: `31c2fccb-0da8-4ee0-a26e-e7fcf3edba43`.
 
 The three live processes were also found stopped at the start of this test with ownership-loss errors from the previous overnight session. The logs establish lost leases, not whether laptop/Docker suspension caused them.
 
-Conclusion: actual provider-to-UI simulated execution and manually assisted replacement passed. Immediate automatic restart recovery failed and remains the first Local A task. No mid-fill crash, multi-day stability, ten-minute capacity, or production scaling is certified by this smoke test. The 93-test suite/build result above predates this operational test; no application code was changed during it.
+Historical conclusion before Local A: actual provider-to-UI simulated execution and manually assisted replacement passed, but immediate automatic restart recovery failed. No mid-fill crash, multi-day stability, ten-minute capacity, or production scaling was certified by this smoke test. The 93-test suite/build result above predates it; no application code was changed during that initial test.
+
+## October 2, 2026 Local A Recovery Acceptance
+
+The same local session remained active during this test, approximately 12:45–12:52 PM Pacific. Generated integration tests used separate local test containers; neither cloud deployment nor hosted data was changed. Only simulated orders were submitted.
+
+- Full Python suite: **106 passed**, with one existing Starlette/httpx deprecation warning. Next.js production build and private Compose configuration validation passed.
+- Replacing the old engine/persistence images left their old leases intact. Both new workers logged waiting, acquired after expiry, and became ready without a second restart or manual lease deletion. Engine acquisition took about 29 seconds; retained-history reconstruction added about 10 seconds.
+- A subsequent immediate graceful engine restart released its owned leases and acquired without waiting. Started at `19:47:46.599Z`, ready at `19:47:57.554Z`: approximately 11 seconds, including history reconstruction. The session ID did not change.
+- Independent persistence restart became ready at `19:48:25.529Z`, immediately after acquisition, without changing the session.
+
+| Actual-feed order | Verified durable outcome |
+| --- | --- |
+| Before immediate engine restart: `70e8df52-e7cc-408b-a437-4abed9dd2206` | Buy 5 MSFT; one fill at 516.300000; quote `alpaca:q:MSFT:2026-10-02T19:47:19.834416571Z:516.22:516.3:40:120`. |
+| After engine recovery: `e47e74d0-46bf-46ed-85a1-17f65778b98e` | Buy 5 MSFT; one fill at 516.060000; quote `alpaca:q:MSFT:2026-10-02T19:48:11.560953366Z:516.01:516.06:40:40`. |
+| After persistence recovery: `d374b787-bc68-45e0-9651-0cefa7c1e5b4` | Buy 5 MSFT; one fill at 517.340000; remaining zero. |
+
+SQL joins verified all five orders in the session, including the original two AAPL orders: exactly one fill totaling five shares each; fill prices equal stored triggering asks; quote times follow submission; sizes fit normalized visible liquidity. Generated subprocess tests independently replace engine and persistence after SIGTERM and SIGKILL and assert unchanged original fill IDs. These tests shorten isolated crash-test leases to one second; real worker leases remain 30 seconds. Slow reconstruction also retained ownership beyond a two-second test lease.
+
+Intentional Docker stop/kill is an administrative stop, not a restart-policy crash test. The intentionally stopped local engine was restored. Sending SIGKILL to namespace PID 1 from inside the container had no effect; no Docker-level automatic crash restart is certified by that attempt. The process-level SIGKILL replacement tests and actual old-lease/graceful replacement checks are separate evidence. The active local ingestion container was not replaced, to avoid an uncoordinated session change; its updated image and SIGTERM cleanup were tested separately with a generated/stubbed feed.
+
+Local A is complete. Leases are cooperative ownership checks, not database fencing: an already-running I/O operation cannot be cancelled retroactively when ownership expires. Idempotent durable fill identifiers remain the duplication safeguard. Ingestion/session coordination after restart or suspension, active-session rollover, and bounded historical retention remain Local B. Multi-day operation, a real-feed mid-fill crash, and 600-second capacity certification remain unverified.
+
+After the accepted fills, at approximately 12:52 PM Pacific, the AAPL source partition reached the existing 100,000-message cap. Ingestion exited with `live session capacity reached; start a new session`; retained data stayed intact and the dashboard disabled orders as stale. No cap was raised, active history deleted, or replacement session started. Local engine/persistence remain running against that session. This is an observed Local B rollover limitation, not a restart-recovery failure.

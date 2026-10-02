@@ -1,7 +1,10 @@
 import json
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
-from time import time
+from threading import Event
+from time import sleep, time, monotonic
 from uuid import uuid4
 
 import pytest
@@ -16,9 +19,160 @@ from market_execution_lab.pipeline import partition_for_symbol, _result_payload
 from market_execution_lab.storage import DatabaseStore
 from market_execution_lab.streaming import partition_stream_name, market_state_key
 from market_execution_lab.validation_service import validate_sustained_pipeline
+from market_execution_lab.live_ownership import LiveOwnership
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.skipif(os.getenv("RUN_STREAMING_INTEGRATION") != "1", reason="requires isolated Redis/PostgreSQL")]
+
+
+def test_real_leases_wait_for_expiry_and_preserve_replacement_owner():
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    keys = [f"test:ownership:{uuid4()}" for _ in range(2)]
+    redis.set(keys[1], "previous", ex=1)
+    ownership = LiveOwnership(redis, keys, Event())
+    try:
+        assert ownership.acquire(4)
+        assert all(redis.get(key) == ownership.owner for key in keys)
+        redis.set(keys[1], "replacement", ex=30)
+        with pytest.raises(RuntimeError, match="ownership lost"):
+            ownership.check(force=True)
+        ownership.release()
+        assert redis.get(keys[0]) is None
+        assert redis.get(keys[1]) == "replacement"
+    finally:
+        ownership.release()
+        redis.delete(*keys)
+
+
+def test_slow_reconstruction_renews_real_leases(monkeypatch):
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    run_id = uuid4()
+    initialize_session(redis, run_id, ["AAPL"], register=False)
+    stream = partition_stream_name(str(run_id), 0)
+    for _ in range(4):
+        redis.xadd(stream, {"message_type": "replay.started.v1"})
+    redis.xreadgroup("engine", "previous", {stream: ">"}, count=100)
+    key = f"live:owner:{run_id}:engine:0"
+    ownership = LiveOwnership(redis, [key], Event(), ttl_seconds=2)
+    original = LiveEngine.process
+
+    def slow_process(engine, message):
+        sleep(0.8)
+        return original(engine, message)
+
+    monkeypatch.setattr(LiveEngine, "process", slow_process)
+    try:
+        assert ownership.acquire()
+        LiveEngine(redis, run_id, 0, ownership.check)
+        assert redis.get(key) == ownership.owner
+        with pytest.raises(RuntimeError, match="already has an owner"):
+            LiveOwnership(redis, [key], Event()).acquire()
+    finally:
+        ownership.release()
+
+
+@pytest.mark.parametrize("replace_owner", [False, True])
+def test_ingestion_sigterm_releases_only_its_own_lease(replace_owner):
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    run_id = uuid4()
+    script = "import asyncio; from market_execution_lab import ingestion_service as service\nasync def stream(*args):\n    await asyncio.Future()\nservice.stream_alpaca = stream\nservice.main()"
+    environment = {**os.environ, "APP_MODE": "private_live", "ALPACA_API_KEY": "test-key", "ALPACA_API_SECRET": "test-secret", "ALPACA_SYMBOLS": "AAPL"}
+    process = subprocess.Popen([sys.executable, "-c", script, "--run-id", str(run_id)], env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = monotonic() + 10
+        while redis.hget(LIVE_SESSION_KEY, "run_id") != str(run_id):
+            assert process.poll() is None
+            assert monotonic() < deadline
+            sleep(0.05)
+        assert redis.exists("live:ingestion-owner")
+        if replace_owner:
+            redis.set("live:ingestion-owner", "replacement", ex=30)
+            redis.hset(LIVE_SESSION_KEY, mapping={"run_id": "replacement-session", "status": "connected"})
+        process.terminate()
+        assert process.wait(timeout=10) == 0, process.communicate()[0]
+        if replace_owner:
+            assert redis.get("live:ingestion-owner") == "replacement"
+            assert redis.hget(LIVE_SESSION_KEY, "status") == "connected"
+        else:
+            assert redis.get("live:ingestion-owner") is None
+            assert redis.hget(LIVE_SESSION_KEY, "status") == "stopped"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+        redis.delete("live:ingestion-owner")
+
+
+@pytest.mark.parametrize("role", ["engine", "persistence"])
+def test_worker_process_recovers_after_graceful_and_abrupt_restart(role):
+    from market_execution_lab.models import OrderCommand
+    redis = Redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
+    store = DatabaseStore(sa.create_engine(os.environ["DATABASE_URL"]))
+    run_id = uuid4()
+    initialize_session(redis, run_id, ["AAPL"], register=False)
+    partition = partition_for_symbol("AAPL")
+    stream = partition_stream_name(str(run_id), partition)
+    lease = f"live:owner:{run_id}:{role}:{partition}"
+    command = [sys.executable, "-m", "market_execution_lab.live_pipeline", "--run-id", str(run_id), "--role", role, "--partitions", str(partition), "--startup-timeout-seconds", "4"]
+    environment = {**os.environ, "APP_MODE": "private_live"}
+    process = None
+
+    def wait_for(predicate):
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            if process.poll() is not None:
+                pytest.fail(process.communicate()[0])
+            if predicate():
+                return
+            sleep(0.05)
+        pytest.fail("worker recovery did not complete")
+
+    def drain():
+        if role == "engine":
+            wait_for(lambda: redis.xpending(stream, "engine")["pending"] == 0 and next(group for group in redis.xinfo_groups(stream) if group["name"] == "engine")["lag"] == 0)
+            persist_live_batch(redis, store, run_id, partition, "test-persistence")
+        else:
+            LiveEngine(redis, run_id, partition).step("test-engine")
+            wait_for(lambda: store.counts_for_run(run_id)["fills"] == len(orders))
+
+    orders = []
+
+    def publish_order(sequence):
+        now = datetime.now(UTC)
+        order = OrderCommand(order_id=uuid4(), run_id=run_id, symbol="AAPL", side="buy", order_type="market", quantity=5, submitted_at=now)
+        quote = normalize_alpaca_message({"T": "q", "S": "AAPL", "bp": 199.98, "bs": 10, "ap": 200, "as": 10, "t": (now + timedelta(milliseconds=1)).isoformat()}, run_id, partition, sequence, now)
+        append_live(redis, stream, {"message_type": "order.command.v1", "payload": order.model_dump_json()})
+        append_live(redis, stream, {"message_type": "market.event.v1", "payload": quote.model_dump_json()})
+        orders.append(order)
+        drain()
+
+    try:
+        process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        wait_for(lambda: redis.exists(lease))
+        publish_order(1)
+        original = store.order_for_id(orders[0].order_id)["fills"]
+        process.terminate()
+        assert process.wait(timeout=10) == 0
+        assert redis.get(lease) is None
+        process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        wait_for(lambda: redis.exists(lease))
+        publish_order(2)
+        previous_owner = redis.get(lease)
+        process.kill()
+        process.wait(timeout=10)
+        assert redis.get(lease) == previous_owner
+        redis.expire(lease, 1)
+        process = subprocess.Popen(command, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        wait_for(lambda: redis.get(lease) not in (None, previous_owner))
+        publish_order(3)
+        assert store.order_for_id(orders[0].order_id)["fills"] == original
+        assert store.counts_for_run(run_id)["fills"] == 3
+        assert all(len(store.order_for_id(order.order_id)["fills"]) == 1 for order in orders)
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            process.wait(timeout=10)
+        redis.delete(lease)
 
 
 def test_private_live_order_uses_subsequent_alpaca_quote_and_survives_replacement(monkeypatch):

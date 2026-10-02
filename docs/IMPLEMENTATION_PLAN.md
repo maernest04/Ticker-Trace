@@ -254,22 +254,22 @@ The October 2 real-feed test completed two five-share AAPL simulations and verif
 
 Build:
 
-- [ ] Add bounded startup retry for occupied live-worker leases at the service entry point; keep fail-fast ownership checks available for tests and competing-worker diagnostics.
-- [ ] Release partially acquired leases before retrying; never delete or overwrite another owner's lease.
-- [ ] Handle graceful shutdown so ingestion and workers release only leases they still own.
-- [ ] Maintain ownership while reconstructing retained history; stop processing when ownership is lost rather than treating lease expiry as permission to continue.
-- [ ] Add an appropriate local worker restart policy and actionable waiting, recovery, timeout, and fatal-error logs. Do not endlessly retry invalid Alpaca credentials.
-- [ ] Preserve the active session during execution/persistence replacement. Ingestion/session replacement coordination belongs to Local B.
+- [x] Add bounded startup retry for occupied live-worker leases at the service entry point; keep fail-fast ownership checks available for tests and competing-worker diagnostics.
+- [x] Release partially acquired leases before retrying; never delete or overwrite another owner's lease.
+- [x] Handle graceful shutdown so ingestion and workers release only leases they still own.
+- [x] Maintain ownership while reconstructing retained history; stop processing when ownership is lost rather than treating lease expiry as permission to continue.
+- [x] Add an appropriate local worker restart policy and actionable waiting, recovery, timeout, and fatal-error logs. Do not endlessly retry invalid Alpaca credentials.
+- [x] Preserve the active session during execution/persistence replacement. Ingestion/session replacement coordination belongs to Local B.
 
 Verify:
 
-- [ ] Reproduce immediate restart with an unexpired old lease, then prove one restart recovers without a second manual retry.
-- [ ] Verify a healthy competing owner remains exclusive and the contender waits or times out safely.
-- [ ] Test partial acquisition, graceful termination, abrupt termination, slow reconstruction, and ownership loss with deterministic clocks where possible.
-- [ ] Replace execution and persistence independently against local generated input; assert unchanged fill IDs, quantities, and durable results.
-- [ ] Repeat the real-feed test: fresh quote, simulated fill, immediate worker restart, post-recovery fill, and exactly one durable fill per fully filled small order.
+- [x] Reproduce immediate restart with an unexpired old lease, then prove one restart recovers without a second manual retry.
+- [x] Verify a healthy competing owner remains exclusive and the contender waits or times out safely.
+- [x] Test partial acquisition, graceful termination, abrupt termination, slow reconstruction, and ownership loss with deterministic clocks where possible.
+- [x] Replace execution and persistence independently against local generated input; assert unchanged fill IDs, quantities, and durable results.
+- [x] Repeat the real-feed test: fresh quote, simulated fill, immediate worker restart, post-recovery fill, and exactly one durable fill per fully filled small order.
 
-Acceptance: execution/persistence replacement recovers within the configured startup deadline without lease theft, duplicate fills, or manual lease cleanup. Laptop/Docker suspension must fail safely; full session recovery after ingestion replacement is accepted in Local B.
+Acceptance passed October 2: worker entry points wait up to 45 seconds for the previous 30-second lease, then reconstruct retained input in 100-message batches with ownership checks and renewal. The startup deadline bounds acquisition, not reconstruction time. Library calls remain fail-fast by default. Graceful shutdown releases owned leases; abrupt process termination waits for expiry. Local engine/persistence use `on-failure:3` and a 20-second shutdown grace period; ingestion has no automatic restart policy. Tests cover SIGTERM/SIGKILL process replacement, slow reconstruction, partial acquisition, cancellation, and lost ownership. Real-feed replacement needed no second restart or manual lease cleanup; see `PRE_PHASE_7.md` for timings and durable quote-linked fills. Laptop/Docker suspension must fail safely; full session recovery after ingestion replacement is accepted in Local B.
 
 ### Local B — Session Lifecycle and Bounded Retention
 
@@ -315,7 +315,7 @@ Acceptance: reproducible local engineering and evidence are ready for Phase 7. C
 2. Local B lifecycle and retention → accelerated rollover/failure checks.
 3. Local C ten-minute evidence and documentation → Phase 7 presentation.
 
-Complete and verify each section before starting the next. This plan is documentation only; none of the new Local A/B/C items is implemented by this update.
+Complete and verify each section before starting the next. Local A is implemented and verified; Local B and Local C remain pending.
 
 ## Phase 7: Project Presentation
 

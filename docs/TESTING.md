@@ -16,11 +16,11 @@ The continuous acceptance test offers generated input independently of consumers
 
 ## Current Local-First Acceptance
 
-Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). These tests are planned, not coverage added by this documentation update.
+Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). Local A is implemented; B/C remain planned.
 
-- [ ] Local A: immediate restart waits safely for an unexpired old lease and resumes without manual retry; a competing healthy owner is never displaced.
-- [ ] Local A: partial ownership acquisition, graceful/abrupt termination, slow reconstruction, and lost ownership preserve exclusivity and idempotent fills.
-- [ ] Local A: execution and persistence replacements recover independently; repeat the actual provider-linked browser test after the fix.
+- [x] Local A: immediate restart waits safely for an unexpired old lease and resumes without manual retry; a competing healthy owner is never displaced.
+- [x] Local A: partial ownership acquisition, graceful/abrupt termination, slow reconstruction, and lost ownership preserve exclusivity and idempotent fills.
+- [x] Local A: execution and persistence replacements recover independently; repeat the actual provider-linked browser test after the fix.
 - [ ] Local B: ingestion restart restores the same recoverable session and subscriptions; laptop/Docker suspension does not orphan workers on the wrong session.
 - [ ] Local B: forced rollover closes partial orders explicitly, drains source/results, and activates exactly one replacement session.
 - [ ] Local B: retries at each rollover stage are safe; bounded cleanup preserves active/pending work, retained triggering quotes, and unrelated records.
@@ -29,7 +29,7 @@ Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN
 
 October 2 manual actual-feed smoke: two five-share AAPL orders filled at 332.89 and 332.94; SQL verified subsequent-quote linkage and one fill row per order. Immediate engine restart failed because the old lease still existed. Retrying after expiry restored fresh quotes and subsequent execution. This is manually assisted recovery, not a passed immediate automatic recovery test or a mid-fill crash test. Full identifiers and scope are in [PRE_PHASE_7.md](PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
 
-The previously recorded 93 passing tests and Next.js build predate that operational test. No application code or tests changed in this documentation update. Cloud concurrency, rollback, and 24-hour usage checks remain deferred while the project is local-first.
+After Local A: 106 Python tests passed against isolated Redis/PostgreSQL, and the Next.js production build passed. New coverage includes deterministic retry deadlines/cancellation, compare-and-delete ownership, real lease expiry/loss, reconstruction lasting longer than its two-second test lease, ingestion SIGTERM cleanup without touching a replacement owner/session, and independent worker SIGTERM/SIGKILL replacements preserving fill IDs. The subprocess crash tests shorten only isolated test leases to one second; production leases remain 30 seconds. Actual-feed graceful replacement and surviving-old-lease upgrade were verified separately, with quote-linked MSFT fills. This does not certify multi-day operation, laptop suspension recovery, or crash-fencing of an already-running database operation. Cloud concurrency, rollback, and 24-hour usage checks remain deferred.
 
 ## Testing Goals
 
