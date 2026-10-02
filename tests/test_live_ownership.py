@@ -1,10 +1,12 @@
 from threading import Event
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
 
 from market_execution_lab import live_ownership
+from market_execution_lab import ingestion_service
+from market_execution_lab.live_ownership import OwnershipLost
 from market_execution_lab.live_ownership import LiveOwnership, RELEASE_LEASE
 from market_execution_lab.live_pipeline import LiveEngine
 
@@ -95,3 +97,30 @@ def test_reconstruction_stops_before_next_batch_when_ownership_is_lost():
     with pytest.raises(RuntimeError, match="ownership lost"):
         LiveEngine(redis, uuid4(), 0, guard)
     assert redis.xrange.call_count == 1
+
+
+def test_ingestion_entry_point_retries_only_ownership_loss(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["ingestion"])
+    run = AsyncMock(side_effect=[ExceptionGroup("expired", [OwnershipLost("lost")]), None])
+    monkeypatch.setattr(ingestion_service, "run", run)
+    monkeypatch.setattr(ingestion_service.asyncio, "sleep", AsyncMock())
+    ingestion_service.main()
+    assert run.await_count == 2
+
+
+@pytest.mark.parametrize("failures", [[RuntimeError("missing history")], [OwnershipLost("lost"), RuntimeError("missing history")], [PermissionError("auth"), RuntimeError("missing history")]])
+def test_ingestion_entry_point_does_not_retry_unrelated_failures(monkeypatch, failures):
+    monkeypatch.setattr("sys.argv", ["ingestion"])
+    run = AsyncMock(side_effect=ExceptionGroup("failed", failures))
+    monkeypatch.setattr(ingestion_service, "run", run)
+    with pytest.raises(ExceptionGroup):
+        ingestion_service.main()
+    assert run.await_count == 1
+
+
+def test_ingestion_entry_point_stops_on_fatal_authentication(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["ingestion"])
+    run = AsyncMock(side_effect=ExceptionGroup("auth", [PermissionError("auth")]))
+    monkeypatch.setattr(ingestion_service, "run", run)
+    ingestion_service.main()
+    assert run.await_count == 1

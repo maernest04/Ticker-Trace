@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from redis import asyncio as aioredis
 from redis import Redis
+from redis.exceptions import TimeoutError as RedisTimeoutError
 import sqlalchemy as sa
 
 from market_execution_lab.alpaca import (
@@ -22,6 +23,7 @@ from market_execution_lab.pipeline import partition_for_symbol
 from market_execution_lab.streaming import partition_stream_name
 from market_execution_lab.live_pipeline import LIVE_SESSION_KEY, LIVE_MAX_BACKLOG
 from market_execution_lab.live_sessions import LiveLimits, SessionCoordinator
+from market_execution_lab.live_ownership import OwnershipLost
 from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 
 
@@ -72,7 +74,7 @@ async def run(run_id: UUID | None, redis_url: str) -> None:
             "redis.call('XADD', KEYS[3], '*', 'message_type', 'market.event.v1', 'payload', ARGV[4]); redis.call('HSET', KEYS[2], 'status', 'connected', 'received_at', ARGV[5]); return 1",
             3, "live:ingestion-owner", LIVE_SESSION_KEY, stream, owner, str(current_run_id), limits.messages, event.model_dump_json(), str(time()))
         if result == -1:
-            raise RuntimeError("ingestion ownership lost")
+            raise OwnershipLost("ingestion ownership lost")
         if not result:
             raise SessionRollover()
 
@@ -141,9 +143,17 @@ async def run(run_id: UUID | None, redis_url: str) -> None:
                 raise RuntimeError("a private ingestion session is already running; startup wait timed out")
             await asyncio.sleep(1)
         log_event("alpaca_ingestion_started", run_id=str(run_id), symbol_count=len(settings.symbols))
-        async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(heartbeat())
-            tasks.create_task(sessions())
+        try:
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(heartbeat())
+                tasks.create_task(sessions())
+        except ExceptionGroup as failure:
+            _, remaining = failure.split((OwnershipLost, RedisTimeoutError))
+            if remaining is not None or failure.subgroup(RedisTimeoutError) is None:
+                raise
+            if await redis.get("live:ingestion-owner") == owner:
+                raise
+            raise ExceptionGroup("ingestion ownership expired during Redis timeout", [OwnershipLost("ingestion ownership lost")]) from failure
     finally:
         try:
             await redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then if redis.call('HGET', KEYS[2], 'run_id') == ARGV[2] and redis.call('HGET', KEYS[2], 'phase') ~= 'closing' then redis.call('HSET', KEYS[2], 'status', 'stopped') end; return redis.call('DEL', KEYS[1]) end; return 0", 2, "live:ingestion-owner", LIVE_SESSION_KEY, owner, str(current_run_id))
@@ -164,11 +174,21 @@ def main() -> None:
         task = asyncio.current_task()
         loop.add_signal_handler(signal.SIGTERM, task.cancel)
         try:
-            await run(arguments.run_id, arguments.redis_url)
+            while True:
+                try:
+                    await run(arguments.run_id, arguments.redis_url)
+                    return
+                except ExceptionGroup as failure:
+                    _, remaining = failure.split(OwnershipLost)
+                    if remaining is not None:
+                        raise
+                    log_event("alpaca_ingestion_recovering_ownership", run_id=str(arguments.run_id))
+                    await asyncio.sleep(1)
         except asyncio.CancelledError:
             log_event("alpaca_ingestion_stopped", run_id=str(arguments.run_id))
         except ExceptionGroup as failure:
-            if failure.subgroup(PermissionError) is None:
+            _, remaining = failure.split(PermissionError)
+            if remaining is not None:
                 raise
             log_event("alpaca_authentication_fatal", retry=False)
         finally:

@@ -298,17 +298,18 @@ Implementation and generated acceptance passed: 120 total tests and the frontend
 
 ### Local C — Final Evidence and Presentation Readiness
 
-- [x] Run the full Python suite and frontend production build after Local A/B changes: 120 passed; production build passed.
+- [x] Run the full Python suite and frontend production build after Local A/B/C changes: 125 passed; production build passed.
 - [ ] Repeat the local browser workflow with actual quotes, parameterized simulated orders, reconnects, and stale-feed protection.
 - [ ] Measure a nonzero active-window peak for the documented symbol set.
 - [ ] Offer twice that measured rate for at least 600 seconds using isolated local generated load; retain offered-rate, active backlog, drain, latency, duplicate/loss, and error evidence.
-- [ ] Record hardware, software versions, partition/worker settings, local-thread versus separate-process methodology, and dataset/revision identifiers without invoking Git.
-- [ ] Keep in-memory dedupe, finite replay throughput, continuous durable-write latency, and real-feed execution as separate claims.
-- [ ] Check vendor permission before publicly publishing raw live-data screenshots/recordings; use generated data for unrestricted demonstrations if permission is unresolved.
-- [ ] Update architecture, setup instructions, limitations, and resume drafts with measured evidence only.
-- [ ] Verify stopping the local stack stops ingestion/workers while retaining database data; record that browser close alone is not shutdown.
+- [x] Record hardware, software versions, partition/worker settings, local-thread versus separate-process methodology, and dataset/source-hash identifiers without invoking Git.
+- [x] Keep in-memory dedupe, finite replay throughput, continuous durable-write latency, and real-feed execution as separate claims.
+- [x] Review vendor permission before public visuals: public-display permission remains unresolved; publish generated data only. No raw live-data publication performed.
+- [x] Update architecture, setup instructions, limitations, benchmark evidence, and resume drafts with measured results only: 120,000 generated events over 600 seconds; 8.06 ms p95 durable-write latency; not live-peak certification.
+- [x] Verify stopping the local stack stops ingestion/workers while retaining database data; browser close alone is not shutdown. Existing five fills survived stop/start.
+- [x] Add targeted lease-expiry recovery and test repeated process pauses plus an actual container pause beyond the normal 30-second leases, with no process replacements after the final fix. Physical laptop/network suspension remains a separate check.
 
-Acceptance: reproducible local engineering and evidence are ready for Phase 7. Cloud redeployment, owner-only hosting, public concurrency, and 24-hour hosted idle-usage checks are deferred, not passed or required for this local-first milestone.
+Acceptance requires the still-unchecked market-window workflow, nonzero live peak, and 600-second test at twice that measured peak. A separately labelled synthetic endurance run does not replace those checks. Cloud redeployment, owner-only hosting, public concurrency, and 24-hour hosted idle-usage checks are deferred, not passed or required for this local-first milestone. The executable market-window runbook is in `PRE_PHASE_7.md`.
 
 ### Execution Order
 
@@ -316,7 +317,7 @@ Acceptance: reproducible local engineering and evidence are ready for Phase 7. C
 2. Local B lifecycle and retention → accelerated rollover/failure checks.
 3. Local C ten-minute evidence and documentation → Phase 7 presentation.
 
-Local A/B are implemented with generated/local acceptance evidence. Local C and the explicit physical-suspension/market-window checks remain pending; do not claim those passed from process-level tests.
+Local A/B and Local C's available local engineering/evidence work are implemented. Local C's actual-market acceptance, live-peak-sized benchmark, and deliberate physical laptop/network suspension drill remain pending; do not claim those passed from process/container tests or the arbitrary-rate endurance run.
 
 ## Phase 7: Project Presentation
 

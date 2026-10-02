@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from market_execution_lab.live_pipeline import LIVE_SESSION_KEY, LIVE_MAX_MESSAGES, LIVE_MAX_ORDERS, initialize_session, live_backlog
 from market_execution_lab.observability import log_event
+from market_execution_lab.live_ownership import OwnershipLost
 from market_execution_lab.pipeline import PARTITION_COUNT, result_stream_name
 from market_execution_lab.streaming import partition_stream_name
 
@@ -39,7 +40,7 @@ class SessionCoordinator:
 
     def check_owner(self):
         if not self.redis.eval("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], 30) end; return 0", 1, "live:ingestion-owner", self.owner):
-            raise RuntimeError("ingestion ownership lost")
+            raise OwnershipLost("ingestion ownership lost")
 
     def resume(self, symbols: list[str], requested_run_id: UUID | None = None) -> dict:
         self.check_owner()

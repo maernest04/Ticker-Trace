@@ -9,6 +9,10 @@ RENEW_LEASES = "for i,k in ipairs(KEYS) do if redis.call('GET', k) ~= ARGV[1] th
 RELEASE_LEASE = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end; return 0"
 
 
+class OwnershipLost(RuntimeError):
+    pass
+
+
 class LiveOwnership:
     def __init__(self, redis, keys, stop: Event, ttl_seconds=30):
         self.redis, self.keys, self.stop = redis, keys, stop
@@ -50,7 +54,7 @@ class LiveOwnership:
         if force or monotonic() >= self.renew_at:
             if not self.redis.eval(RENEW_LEASES, len(self.keys), *self.keys, self.owner, self.ttl_seconds):
                 log_event("live_ownership_lost", keys=len(self.keys))
-                raise RuntimeError("live partition ownership lost")
+                raise OwnershipLost("live partition ownership lost")
             self.renew_at = monotonic() + min(5, self.ttl_seconds / 3)
 
     def release(self):

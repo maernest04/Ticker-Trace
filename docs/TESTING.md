@@ -16,7 +16,7 @@ The continuous acceptance test offers generated input independently of consumers
 
 ## Current Local-First Acceptance
 
-Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). Local A/B are implemented; Local C and explicit operational checks remain.
+Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#local-first-completion-plan--october-2-2026). Local A/B and available Local C engineering/evidence work are implemented; actual-market, measured-live-rate, and physical laptop/network checks remain.
 
 - [x] Local A: immediate restart waits safely for an unexpired old lease and resumes without manual retry; a competing healthy owner is never displaced.
 - [x] Local A: partial ownership acquisition, graceful/abrupt termination, slow reconstruction, and lost ownership preserve exclusivity and idempotent fills.
@@ -24,9 +24,13 @@ Follow the Local A/B/C checklist in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN
 - [x] Local B: generated-feed ingestion restart restores the same session/subscriptions, fresh quotes, and execution; actual local container restart retains the successor registry/run.
 - [x] Local B: forced time/message/order rollover closes partial orders explicitly, drains source/results, and activates exactly one replacement session.
 - [x] Local B: retries at five injected rollover interruptions are safe; bounded cleanup preserves active work, retained triggering quotes, and unrelated benchmark records.
-- [ ] Unattended physical suspension recovery and a fresh actual-feed post-update simulation remain unverified. Observed laptop sleep/wake cycles exhausted the bounded lease-loss retries; explicit container start recovered and rolled over the expired session.
-- [ ] Local C: run the full suite and frontend production build, measure a nonzero real feed peak, then offer twice that rate for at least 600 seconds using isolated local generated load.
-- [ ] Local C: record workload/environment details, screenshot permissions, and verified shutdown behavior before publishing final claims.
+- [x] Local C: typed lease-expiry recovery; four generated-process pause/resume cycles retain PIDs/fills, including a pause beyond the Redis timeout, followed by another unique quote-linked simulated fill.
+- [x] Local C: actual Docker pause beyond 30-second leases resumes all three processes without replacement or Docker restarts; explicit stack stop/start preserves the five original actual-feed fills.
+- [x] Local C: final full suite **125 passed**, frontend build passed, Compose configuration passed. One existing Starlette/httpx deprecation warning remains.
+- [x] Local C: 600-second synthetic endurance at an arbitrary 200/sec target persists all 120,000 events; 8.06 ms p95 enqueue-to-event-commit latency, zero duplicates/loss, errors or final backlog.
+- [x] Local C: workload/environment/source hashes, vendor review and generated-only public visual policy documented; public raw-data permission is unresolved.
+- [ ] Deliberate physical laptop/network suspension and fresh actual-feed post-update simulation remain unverified. Process/container pause recovery is narrower evidence.
+- [ ] Measure a nonzero active-market peak, then offer twice that measured rate for 600 seconds. The arbitrary-rate synthetic run does not satisfy this gate.
 
 October 2 manual actual-feed smoke: two five-share AAPL orders filled at 332.89 and 332.94; SQL verified subsequent-quote linkage and one fill row per order. Immediate engine restart failed because the old lease still existed. Retrying after expiry restored fresh quotes and subsequent execution. This is manually assisted recovery, not a passed immediate automatic recovery test or a mid-fill crash test. Full identifiers and scope are in [PRE_PHASE_7.md](PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
 

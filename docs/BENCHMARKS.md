@@ -78,8 +78,26 @@ Example smoke check, not market certification:
 market-execution-validate --duplicate-events 10000 --partitions 4 --workers 2 --duration-seconds 15 --target-events-per-second 200 --revision <operator-recorded-revision> --environment-note '<hardware and container limits>' --output benchmarks/local-smoke.json
 ```
 
-Run the 600-second check only after a nonzero active-window `market-execution-measure-live-peak` result, supplying twice that measured peak and a documented environment. A zero after-hours peak is not certification.
+Run the 600-second **live-rate certification** only after a nonzero active-window `market-execution-measure-live-peak` result, supplying twice that measured peak and a documented environment. A zero after-hours peak is not certification. A separately labelled 600-second generated endurance run at an arbitrary documented target is useful engineering evidence but cannot satisfy this gate.
 
 `benchmarks/pre-phase-7-local.json` is exploratory local evidence: one-million-event in-memory dedupe plus a 15-second continuous generated pipeline. It does not certify real-feed execution, ten-minute capacity, multi-machine scaling, browser concurrency, or idle provider quotas.
 
 The refreshed local run persisted all 3,000 generated events: target 200/sec, offered 198.83/sec, final backlog 0, duplicate events 0, and durable-write p50/p95/p99 of 1.33/3.82/33.88 ms. It used four partitions and two local threads per consumer role, Redis 7.4.11 and PostgreSQL 16.15 in a shared eight-CPU Docker VM. The JSON contains environment metadata and active-production backlog samples; these figures are not deployed-system capacity claims.
+
+## Local C Ten-Minute Synthetic Endurance — October 2
+
+[`benchmarks/local-c-endurance.json`](../benchmarks/local-c-endurance.json) records a passed **600-second generated-load test at an arbitrary 200 events/sec target**, not certification at twice a measured live peak. Active-market measurement was unavailable during this after-hours run.
+
+| Measure | Recorded value |
+| --- | --- |
+| Offered / persisted events | 120,000 / 120,000 |
+| Offered rate | 199.99 events/sec |
+| Total elapsed including drain/shutdown | 600.11 seconds |
+| Enqueue-to-PostgreSQL-commit p50 / p95 / p99 | 1.68 / 8.06 / 32.79 ms |
+| Maximum sampled engine / persistence backlog | 20 / 27 messages |
+| Steady backlog slope | -0.00176 messages/sec |
+| Final backlog / duplicate durable observations / worker errors | 0 / 0 / 0 |
+
+The separate engine-only validation received 1,000,000 generated events, detected 10,000 injected duplicate IDs, and produced zero duplicate fills. Those million events were **not** persisted through the distributed pipeline.
+
+Environment: Apple M3, 16 GiB host RAM, macOS 27.0.1, Python 3.13.1; shared Docker 29.8.1 VM with eight CPUs and 8,215,117,824 bytes of memory, Redis 7.4.11 and PostgreSQL 16.15. Four partitions and two local threads per consumer role; producer and continuous consumers shared one Python process. The private Docker stack and regression/build activity shared the host during this run. `caffeinate -i` prevented idle sleep only for the benchmark lifetime. Dataset `continuous_quotes_v1`; source-hash provenance is recorded in `PRE_PHASE_7.md`. No multi-machine scalability, fill/browser latency, market-sized capacity, or cloud quota claim follows from these results.

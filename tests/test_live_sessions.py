@@ -1,4 +1,5 @@
 import os
+import signal
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -331,7 +332,7 @@ service.main()
             assert redis.hget(LIVE_SESSION_KEY, "run_id") == str(run_id)
             wait_for(lambda: client.get("/api/v1/live/session").json()["fresh"])
             response = client.post("/api/v1/orders", json={"run_id": str(run_id), "symbol": "MSFT", "side": "buy", "order_type": "market", "quantity": 5})
-            assert response.status_code == 202
+            assert response.status_code == 202, response.json()
             order_id = UUID(response.json()["order_id"])
             wait_for(lambda: (store.order_for_id(order_id) or {}).get("final_state") == "filled")
             completed = []
@@ -348,6 +349,32 @@ service.main()
             assert len(set(completed + [run_id])) == 4
             assert len(store.order_for_id(order_id)["fills"]) == 1
             assert len(store.events_for_order(order_id)) == 1
+            original_fills = store.order_for_id(order_id)["fills"]
+            process_ids = [process.pid for process in processes]
+            for cycle in range(4):
+                for process in processes:
+                    process.send_signal(signal.SIGSTOP)
+                try:
+                    keys = ["live:ingestion-owner", *redis.scan_iter(match=f"live:owner:{run_id}:*")]
+                    assert len(keys) == 33
+                    for key in keys:
+                        assert redis.expire(key, 1)
+                    sleep(11 if cycle == 0 else 1.2)
+                    assert all(not redis.exists(key) for key in keys)
+                finally:
+                    resumed_at = time()
+                    for process in processes:
+                        process.send_signal(signal.SIGCONT)
+                wait_for(lambda: float(redis.hget(LIVE_SESSION_KEY, "received_at") or 0) > resumed_at and (quote_time := redis.hget(f"state:replay:{run_id}:MSFT", "quote_ingested_at")) and datetime.fromisoformat(quote_time).timestamp() > resumed_at and client.get("/api/v1/live/session").json()["fresh"] and len(list(redis.scan_iter(match=f"live:owner:{run_id}:*"))) == 32)
+                assert [process.pid for process in processes] == process_ids
+                assert redis.hget(LIVE_SESSION_KEY, "run_id") == str(run_id)
+                assert store.order_for_id(order_id)["fills"] == original_fills
+            response = client.post("/api/v1/orders", json={"run_id": str(run_id), "symbol": "MSFT", "side": "buy", "order_type": "market", "quantity": 5})
+            assert response.status_code == 202, response.json()
+            recovered_order_id = UUID(response.json()["order_id"])
+            wait_for(lambda: (store.order_for_id(recovered_order_id) or {}).get("final_state") == "filled")
+            assert len(store.order_for_id(recovered_order_id)["fills"]) == 1
+            assert len(store.events_for_order(recovered_order_id)) == 1
     finally:
         for process in processes:
             if process.poll() is None:

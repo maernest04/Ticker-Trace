@@ -144,3 +144,72 @@ After the accepted fills, at approximately 12:52 PM Pacific, the AAPL source par
 Defaults are 30-minute sessions, 90,000 messages per partition, 240 orders, 15-minute closed Redis recovery grace, one-hour closed raw-event retention, and 24-hour closed order/fill explanations. Expired private data is intentionally removed; export evidence before its deadline. Closed Redis history has expired under this policy, while retained fill explanations remain in PostgreSQL. Restore deleted history only from a prior export/backup. Active reconstruction history is not trimmed.
 
 Actual post-update fresh quotes and execution were not verified after hours. Unattended physical sleep/wake recovery remains an open operational limitation requiring a deliberate drill and retry-policy decision. Multi-day stability and a 600-second run at twice a measured nonzero live peak remain Local C, not certified capacity.
+
+## Local C Market-Window Completion Runbook
+
+This is the remaining external acceptance, not an automatic scheduled task. Use the existing `tickertrace-local` instance and isolated local benchmark dependencies. Do not change the public deployment or use hosted free-tier storage for load tests.
+
+1. During an active quote window, open `http://localhost:3030`, confirm AAPL/MSFT show Fresh, submit a five-share simulated market order, and save its run/order IDs. Verify the durable fill and triggering quote via `/api/v1/orders/<order_id>` and `/api/v1/orders/<order_id>/events`. Quote time must follow submission and fill price must equal the triggering side's price. No real brokerage orders are authorized.
+2. Restart engine, then persistence separately. Confirm registry identity, fresh quotes, a subsequent simulated fill, and unchanged original fill IDs. Exercise a small limit order and artificial latency separately; an unfilled limit is not a failed test if price never crosses it. Verify stale quotes disable submission, then wait for actual fresh quotes to enable it again.
+3. To avoid opening a competing provider connection, stop normal ingestion while measuring the peak with its existing credentials and AAPL/MSFT settings:
+
+```bash
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml stop ingestion
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml run --rm --no-deps ingestion market-execution-measure-live-peak --duration-seconds 60
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml start ingestion
+```
+
+Record the date/time, subscription set, total events, duration, and nonzero one-second peak. The CLI measures normalized quote/trade events, not all-exchange market volume. Restart normal ingestion even if measurement fails. A zero peak is not an acceptance value; repeat during a genuinely active window without changing providers or claiming fabricated data is live.
+
+4. Start the dedicated test Redis/PostgreSQL, then substitute twice the recorded peak for `TARGET` below. Use a separate JSON path so the synthetic endurance evidence is not overwritten:
+
+```bash
+docker start tickertrace-pre7-redis tickertrace-pre7-postgres
+caffeinate -i .venv/bin/python -m market_execution_lab.validation_service --redis-url redis://127.0.0.1:56379/2 --database-url postgresql+psycopg://tickertrace:pre7-local-test@127.0.0.1:55432/tickertrace --partitions 4 --workers 2 --duration-seconds 600 --target-events-per-second TARGET --revision operator-recorded-source-hash --environment-note 'Record hardware, Docker limits, live peak measurement and workload here' --output benchmarks/local-c-live-rate.json
+```
+
+Accept only an exit-zero result with offered rate at least 95% of target, steady backlog slope within the documented tolerance, fully drained backlog, zero worker errors, zero duplicate/lost durable events, and complete sample orders. Record load failures too; do not raise limits or replace the target to manufacture a pass. This is a local-thread generated-load test sized from a live peak, not multi-machine or browser capacity.
+
+5. Repeat a deliberate physical sleep/wake drill during fresh quotes, with data retained and the laptop returned to normal operation; verify recovery, freshness, and duplicate-free execution. Container/process pauses are narrower evidence and do not replace this check. Capture generated replay visuals for public demos until account-specific vendor display/redistribution permission is established.
+
+Vendor review on October 2: [Alpaca's real-time stock documentation](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data) documents the IEX stream and subscription-scoped access, not public screenshot redistribution permission. [IEX's market-data documents](https://www.iex.io/resources/trading/market-data) require applicable agreements. These sources do not establish this account's public-display permission; no raw live-data publication was performed.
+
+## October 2, 2026 Local C Engineering Evidence
+
+Local work is complete; the active-market and deliberate physical laptop/network checks above remain open. No cloud services were changed, no real brokerage orders were placed, and no public raw-data screenshot was published.
+
+### Recovery and shutdown
+
+- Final isolated Redis/PostgreSQL suite: **125 passed**, with one existing Starlette/httpx deprecation warning; Next.js production build and private Compose configuration passed.
+- Added typed ownership-loss recovery at the live entry points. Each attempt releases only owned leases, waits one second, acquires a new owner token, and resumes/reconstructs against the registry. This preserves exclusivity instead of silently extending an expired lease. Unrelated failures and healthy competing ownership still fail through bounded paths. Fatal authentication does not restart; mixed authentication/unrelated exception groups are no longer silently treated as authentication-only.
+- A container pause initially exposed an additional Redis read-timeout path. Recovery now treats that timeout as lease loss only after Redis independently confirms the old ingestion token is no longer current. If that confirmation fails or an unrelated error is present, the error remains fatal to that attempt.
+- Generated service tests perform three rollovers, then four SIGSTOP/SIGCONT cycles with isolated leases shortened to one second. The first pause lasts 11 seconds, beyond the service Redis socket timeout. All process IDs stay unchanged; tests wait for a new cached symbol quote, not just a fresh ingestion heartbeat, and verify a subsequent simulated order plus unchanged original fills.
+- Actual Docker pause drill: all three running live containers paused at approximately `22:32:54Z`, unpaused after their normal 30-second leases expired, and logged acquisition/recovery without Docker restarts. Ingestion/engine/persistence host PIDs remained 4801/3819/3879, with restart counts zero. The run stayed `c6e930ae-2b05-438d-8b78-e98c130714cd`, subscriptions stayed AAPL/MSFT, and readiness returned. This is container suspension evidence, not a physical laptop/network test or fresh market execution.
+- Full-stack Compose `stop` shut down ingestion/engine/persistence with exit code zero and stopped frontend/API/Redis/PostgreSQL. Compose `start` restored services and migration 0005 completed successfully. SQL after restart verified five retained orders, five fills totaling 25 shares, all matching their subsequent triggering asks. Browser close alone does not stop services.
+- Application update also gracefully recreated dependencies during this run. Redis restored 131 keys from an RDB saved in its inherited anonymous `/data` volume; current source history and registry survived. This observed success is not a durable backup guarantee. Future application-only image updates should use `--no-deps` after migrations succeed.
+- Browser reload after recovery showed a connected session with no fresh quotes and a disabled simulation button, as expected after hours. Screenshot `/private/tmp/ticker-trace-local-c-stale.png` contains no raw quote values. No post-update provider-fill claim follows from this stale-feed check.
+
+### Ten-minute synthetic workload
+
+`benchmarks/local-c-endurance.json`: 600 seconds requested, 600.11 seconds total elapsed, 120,000 offered and persisted events, 199.99 events/sec offered against an arbitrary 200/sec target. Enqueue-to-market-event-commit p50/p95/p99: 1.68/8.06/32.79 ms. Maximum sampled engine/persistence backlog: 20/27; steady slope -0.00176 messages/sec; final backlog, duplicate durable observations, and worker errors all zero. The independent in-memory million-event check detected 10,000 duplicate IDs and produced zero duplicate fills. These are separate workloads.
+
+Environment: Apple M3, 16 GiB host, macOS 27.0.1, Python 3.13.1, shared Docker 29.8.1 VM with eight CPUs and 8,215,117,824 bytes RAM; Redis 7.4.11 and PostgreSQL 16.15. Dataset `continuous_quotes_v1`, four partitions, two threads per consumer role in one Python process. Regression tests, container builds, and the live stack shared the host. Benchmark dependencies were dedicated local containers, not hosted free-tier services. Idle sleep was inhibited only while the benchmark ran.
+
+The benchmark started before the Part C retry edits; loaded-source SHA-256 provenance:
+
+| Source | SHA-256 |
+| --- | --- |
+| `validation_service.py` | `7d10c1e5d33efa8b6e2ab94922fa21571dce18e0d8a031e35ff0c0d481e7859f` |
+| `live_pipeline.py` | `3a5a09b0949514115f998c8326eae91c53486cb96e73c93ec3a236e7c4c68015` |
+| `storage.py` | `4b6ef22ff2076568d47107f46a551c460dbcb3c0a15fd7a483ffbfbe2f19a3dc` |
+
+Final recovery sources were separately tested; no Git commands were used:
+
+| Source | SHA-256 |
+| --- | --- |
+| `live_ownership.py` | `8565effd62c48cd7bda36e71f146aeadcea2368f004210b4593e6e44c140b4fa` |
+| `live_pipeline.py` | `470c2dc850e923d57cd78081b011c400ba345c60e2c735281a1ca4f15d7f364c` |
+| `ingestion_service.py` | `16171427f67332bcb8d97857a6015b66760ede8add2c6287b89ea8353e4bb4d7` |
+| `live_sessions.py` | `0f7423f8a436ba12452022e33e44be0799e4c7eae7996323f3ccbd2fb7874d50` |
+
+This run does not establish twice-live-peak capacity, multi-machine scaling, fill/browser latency, indefinite uptime, complete physical suspension recovery, or public redistribution rights. The remaining checklist must stay open until those scoped acceptance steps are actually verified.

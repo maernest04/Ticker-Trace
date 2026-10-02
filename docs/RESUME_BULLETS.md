@@ -14,6 +14,14 @@
 
 - Built and deployed a generated-data stock-execution dashboard for comparing order size and latency, visualizing spread cost, fill rate, and quote-linked execution outcomes
 
+## Verified Local Evidence Bullets — October 2
+
+- Built a Python/FastAPI stock-execution simulator with private Alpaca IEX streaming, Redis caching, PostgreSQL, and a Next.js UI; verified five live-quote-linked simulated fills without duplicates
+- Sustained 120K generated events over 10 minutes through Redis Streams and PostgreSQL using four partitions and concurrent local consumers; measured 8.06 ms p95 durable-write latency with zero lost or duplicate events
+- Engineered coordinated session rollover and retained-history recovery across ingestion, execution, and persistence processes; validated three generated-feed rollovers and four lease-expiry pause/resume cycles without duplicate fills
+
+The latency bullet measures enqueue-to-market-event commit, not fill or browser latency. The endurance test used an arbitrary 200 events/sec target and local threads, not twice a measured live peak or distributed-machine scaling. The five real-feed fills predate the Part C update; pause/rollover tests use generated data. Keep these qualifiers available in the README and interview explanation.
+
 ## Metrics to Collect
 
 - Events processed per second

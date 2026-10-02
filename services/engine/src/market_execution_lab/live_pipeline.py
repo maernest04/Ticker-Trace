@@ -20,7 +20,7 @@ from market_execution_lab.pipeline import (
 from market_execution_lab.storage import DatabaseStore, sqlalchemy_url
 from market_execution_lab.streaming import cache_market_state, cache_order_state, event_from_json, market_state_key, order_state_key, partition_stream_name
 from market_execution_lab.observability import configure_logging, log_event
-from market_execution_lab.live_ownership import LiveOwnership
+from market_execution_lab.live_ownership import LiveOwnership, OwnershipLost
 
 
 LIVE_SESSION_KEY = "live:session"
@@ -279,9 +279,17 @@ def main() -> None:
     previous_handlers = {sig: signal.signal(sig, lambda *_: stop.set()) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         while not stop.is_set():
-            run_live_worker(redis, store, run_id, args.partitions, args.role, stop=stop, startup_timeout_seconds=args.startup_timeout_seconds, follow_session=not args.run_id)
-            if args.run_id:
-                break
+            try:
+                run_live_worker(redis, store, run_id, args.partitions, args.role, stop=stop, startup_timeout_seconds=args.startup_timeout_seconds, follow_session=not args.run_id)
+            except OwnershipLost:
+                log_event("live_worker_recovering_ownership", role=args.role, run_id=str(run_id))
+                if stop.wait(1):
+                    break
+                if args.run_id:
+                    continue
+            else:
+                if args.run_id:
+                    break
             session_id = redis.hget(LIVE_SESSION_KEY, "run_id")
             if not session_id:
                 raise RuntimeError("active live registry disappeared; restore ingestion before workers")
