@@ -244,6 +244,79 @@ Phase 1 is complete.
 
 Complete A (private live execution), B (meaningful replay), and C (continuous-load evidence and honest documentation) using the build and acceptance checklists in [PRE_PHASE_7.md](PRE_PHASE_7.md). Local implementation and external market/deployment/24-hour checks are tracked separately. Do not treat the older checked phase items as proof that this exit gate passed.
 
+## Local-First Completion Plan — October 2, 2026
+
+This is the current build priority. It supersedes cloud deployment as an acceptance gate, not the historical phase records above. Run Next.js, FastAPI, Redis, PostgreSQL, ingestion, execution, and persistence on the laptop. Internet is required for Alpaca; generated replay remains the offline testing path. No owner-authentication system, cloud deployment, cloud shutdown, or automatic provider monitoring is included. Existing cloud resources remain unchanged until explicitly managed separately.
+
+The October 2 real-feed test completed two five-share AAPL simulations and verified both against persisted subsequent quotes. Immediate execution-worker restart failed on a retained ownership lease; a manual retry after expiry succeeded. See [the evidence record](PRE_PHASE_7.md#october-2-2026-real-feed-local-acceptance).
+
+### Local A — Automatic Restart Recovery
+
+Build:
+
+- [ ] Add bounded startup retry for occupied live-worker leases at the service entry point; keep fail-fast ownership checks available for tests and competing-worker diagnostics.
+- [ ] Release partially acquired leases before retrying; never delete or overwrite another owner's lease.
+- [ ] Handle graceful shutdown so ingestion and workers release only leases they still own.
+- [ ] Maintain ownership while reconstructing retained history; stop processing when ownership is lost rather than treating lease expiry as permission to continue.
+- [ ] Add an appropriate local worker restart policy and actionable waiting, recovery, timeout, and fatal-error logs. Do not endlessly retry invalid Alpaca credentials.
+- [ ] Preserve the active session during execution/persistence replacement. Ingestion/session replacement coordination belongs to Local B.
+
+Verify:
+
+- [ ] Reproduce immediate restart with an unexpired old lease, then prove one restart recovers without a second manual retry.
+- [ ] Verify a healthy competing owner remains exclusive and the contender waits or times out safely.
+- [ ] Test partial acquisition, graceful termination, abrupt termination, slow reconstruction, and ownership loss with deterministic clocks where possible.
+- [ ] Replace execution and persistence independently against local generated input; assert unchanged fill IDs, quantities, and durable results.
+- [ ] Repeat the real-feed test: fresh quote, simulated fill, immediate worker restart, post-recovery fill, and exactly one durable fill per fully filled small order.
+
+Acceptance: execution/persistence replacement recovers within the configured startup deadline without lease theft, duplicate fills, or manual lease cleanup. Laptop/Docker suspension must fail safely; full session recovery after ingestion replacement is accepted in Local B.
+
+### Local B — Session Lifecycle and Bounded Retention
+
+Build:
+
+- [ ] Make the active-session registry authoritative and have workers follow session changes without processing the wrong run.
+- [ ] Resume a recoverable session after an ordinary ingestion restart; restore persisted subscriptions instead of silently reverting UI changes.
+- [ ] Coordinate session rollover before time, source-message, or order capacity is exhausted. Choose configurable thresholds from measured local traffic rather than merely raising the existing caps.
+- [ ] Stop new submissions during rollover, establish a closing event boundary, and drain engine/persistence work through that boundary.
+- [ ] Preserve partial fills and explicitly cancel any unfilled remainder with a session-ended reason; do not silently carry an order into a new experiment.
+- [ ] Activate the replacement session only after the old one is durably closed; reconnect the UI and workers automatically.
+- [ ] Expire closed-session source/result streams, caches, control history, and diagnostics only after completion and a recovery grace period. Do not trim active reconstruction history.
+- [ ] Prune old private raw events and session/order history in bounded batches; preserve triggering quotes for as long as their fill explanations are retained.
+- [ ] Document retention settings, disk growth, startup/stop commands, session reset behavior, and recovery limitations. Retention duration is an explicit operator setting, not an unmeasured quota guarantee.
+
+Verify:
+
+- [ ] Force time/message/order rollover with small test thresholds while an order is partially filled.
+- [ ] Crash and retry each rollover stage; verify one active session, recoverable progress, and no duplicate fills or orphaned workers.
+- [ ] Restart ingestion and resume laptop/Docker operation; verify subscriptions, worker session IDs, freshness, and subsequent execution.
+- [ ] Verify cleanup preserves active/pending work, retained fill quotes, and unrelated public replay or benchmark records.
+- [ ] Run accelerated multiple-session tests and confirm Redis/PostgreSQL history stays within the configured retention bounds.
+
+Acceptance: several consecutive sessions complete without manual restarts or lost explanations; closure and cleanup are idempotent, and active work is never deleted to enforce a storage cap.
+
+### Local C — Final Evidence and Presentation Readiness
+
+- [ ] Run the full Python suite and frontend production build after Local A/B changes.
+- [ ] Repeat the local browser workflow with actual quotes, parameterized simulated orders, reconnects, and stale-feed protection.
+- [ ] Measure a nonzero active-window peak for the documented symbol set.
+- [ ] Offer twice that measured rate for at least 600 seconds using isolated local generated load; retain offered-rate, active backlog, drain, latency, duplicate/loss, and error evidence.
+- [ ] Record hardware, software versions, partition/worker settings, local-thread versus separate-process methodology, and dataset/revision identifiers without invoking Git.
+- [ ] Keep in-memory dedupe, finite replay throughput, continuous durable-write latency, and real-feed execution as separate claims.
+- [ ] Check vendor permission before publicly publishing raw live-data screenshots/recordings; use generated data for unrestricted demonstrations if permission is unresolved.
+- [ ] Update architecture, setup instructions, limitations, and resume drafts with measured evidence only.
+- [ ] Verify stopping the local stack stops ingestion/workers while retaining database data; record that browser close alone is not shutdown.
+
+Acceptance: reproducible local engineering and evidence are ready for Phase 7. Cloud redeployment, owner-only hosting, public concurrency, and 24-hour hosted idle-usage checks are deferred, not passed or required for this local-first milestone.
+
+### Execution Order
+
+1. Local A implementation and regression checks → real-feed restart retest.
+2. Local B lifecycle and retention → accelerated rollover/failure checks.
+3. Local C ten-minute evidence and documentation → Phase 7 presentation.
+
+Complete and verify each section before starting the next. This plan is documentation only; none of the new Local A/B/C items is implemented by this update.
+
 ## Phase 7: Project Presentation
 
 ### 7A — Technical Documentation
