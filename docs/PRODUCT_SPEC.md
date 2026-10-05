@@ -1,5 +1,11 @@
 # Product Specification
 
+## Recorded-market extension
+
+The private local workflow now supports saving an observed stock interval and comparing two independent simulated orders with exactly one controlled configuration change. Its central question is: which source event first explains a difference in execution? Quantity, latency, limit-price, and market/limit changes reuse the existing top-of-book rules; these are model explanations, not predictions of broker fills.
+
+The intended user task is to select an interval, vary a parameter, inspect the responsible quote, and explain the outcome without terminal access. Actual user usefulness and a reason to return are not validated yet. Retain execution simulation rather than adding a reconciliation ledger; do not claim originality merely because recording or replay exists.
+
 ## Status
 
 Approved for MVP implementation.

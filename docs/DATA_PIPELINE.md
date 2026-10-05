@@ -2,6 +2,18 @@
 
 ## Current implemented flow — pre-Phase 7
 
+### Private recording and replay
+
+1. Confirm private recording/storage permission, select one or two already-subscribed symbols, and freeze their current partition cursors.
+2. Poll bounded retained source batches without a second provider connection. Preserve per-symbol source order and original normalized event IDs, prices, sizes, and available timestamps. Deleted/trimmed history, rollover, stale/disconnected ingestion, and restart fail closed.
+3. A normal user/time/event/byte stop freezes a bounded prefix. Atomically publish a ready manifest only after content validation and checksum/count/boundary checks. Raw inputs are private ignored files, not public fixtures.
+4. Select one symbol and a source-event insertion boundary. Earlier events warm state but cannot activate or fill the order, including equal-time preceding entries. Stale and duplicate inputs remain in source order and follow existing engine rules rather than being sorted away.
+5. Publish a complete isolated finite run at max/1×/5×/20× pacing. Recorded admission is capped at 80,003 source messages; the existing public 10,000-message limit and live hard caps remain unchanged. Refresh operational ingestion timestamps while preserving historical market time.
+6. Separate local execution/persistence processes recover pending work and write idempotent results. Completion also verifies the durable source count and canonical fills. Partial publication never dispatches as a completed input.
+7. Persist experiment provenance and compare two same-input configurations differing in one parameter. Return first state/fill divergence, final-fill/state equality, signed metric deltas, and original quote/cursor evidence. Browser event, decision, and fill reads are paged.
+
+Recorded data is never Fresh live data. Source timestamps are normalized to microseconds, not full provider nanoseconds; current quote lot normalization still applies. Observed IEX input is not consolidated market coverage, and absence of a diagnosed gap does not prove complete vendor delivery. Capturing stops at its bound even if the UI closes; closing the dashboard does not stop ordinary live ingestion.
+
 The sections below the historical-proposal heading describe initial intent, not current guarantees.
 
 ### Contracts and units

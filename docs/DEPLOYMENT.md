@@ -1,5 +1,23 @@
 # Deployment Plan
 
+## Local recorded laboratory
+
+The existing private Compose API now bind-mounts the ignored repository `recordings/` directory at `/app/recordings`. Only the API owns its capture/job controller; recorded execution and persistence use the existing local Python entry points as separate subprocesses, without new always-polling containers. Public deployment configurations do not enable recording routes or mount real input.
+
+Rebuild the local API and frontend after this extension, using your existing private env file and project name. For the current checkout's local stack:
+
+```bash
+POSTGRES_PASSWORD=tickertrace-local-only docker compose --project-name tickertrace-local --env-file .env -f infra/docker-compose.private.yml up -d --build --no-deps api frontend
+```
+
+This updates application containers, not database/Redis volumes. For another laptop use its own private password/env file and the dependency-ordered startup procedure below. Open `http://localhost:3030/recorded`; confirm private recording/storage permission before capture, then choose subscribed symbols, duration, and Start. Stop/finalize or let the bound expire, select a ready interval, and run one replay or a one-parameter comparison.
+
+Offline recorded replay needs only local Redis/PostgreSQL/API/frontend and the saved files, not running ingestion or Alpaca credentials. Ordinary live ingestion does not stop when a browser closes. For a deliberately offline session, stop ingestion and the live engine/persistence services without deleting volumes; completed saved inputs remain usable. Do not mistake a generated UI preview for an actual market capture.
+
+Files are capped at 64 MiB each, 256 MiB aggregate, and ten saved experiments. There is no automatic eviction or archival/deletion endpoint. Once full, stop services and deliberately archive private recording/job files before more work; file archival does not remove associated PostgreSQL rows. Database history from recorded experiments currently remains operator-managed and is not a guaranteed disk quota. Do not distribute archives publicly or weaken ignore rules.
+
+API shutdown interrupts publication/worker subprocesses; restart labels unfinished jobs failed and unfinished capture incomplete rather than resuming them silently. Retained source recovery is bounded; destroyed history cannot be recovered. Actual permission, capture, physical laptop/network recovery, and user validation remain explicit acceptance tasks.
+
 ## Local Container Stack
 
 Copy `infra/.env.production.example` to `infra/.env`, replace `POSTGRES_PASSWORD`, then run:

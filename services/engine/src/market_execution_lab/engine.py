@@ -84,7 +84,7 @@ class ExecutionEngine:
     def remaining_quantity(self) -> int:
         return self._remaining_quantity
 
-    def process(self, event: MarketEvent) -> None:
+    def process(self, event: MarketEvent, *, execute: bool = True) -> bool:
         if self._final_result is not None:
             raise RuntimeError("cannot process events after finalization")
 
@@ -92,7 +92,7 @@ class ExecutionEngine:
 
         if event.event_id in self._seen_event_ids:
             self._duplicate_events += 1
-            return
+            return False
 
         self._seen_event_ids.add(event.event_id)
         event_key = (event.event_time, event.sequence)
@@ -100,10 +100,12 @@ class ExecutionEngine:
             last_event_key = (self.market_state.last_event_time, self.market_state.last_event_sequence)
             if event_key <= last_event_key:
                 self._stale_events += 1
-                return
+                return False
 
         _apply_event_to_market_state(self.market_state, event)
         self._processed_events += 1
+        if not execute:
+            return True
 
         activation_time = self.order.submitted_at + timedelta(milliseconds=self.order.latency_ms)
         if not self._active and event.event_time >= activation_time:
@@ -120,15 +122,15 @@ class ExecutionEngine:
             )
 
         if not self._active or self._remaining_quantity == 0 or not isinstance(event, QuoteEvent):
-            return
+            return True
 
         if not _is_fill_eligible(self.order, self.market_state):
-            return
+            return True
 
         available_quantity, fill_price = _available_quantity_and_price(self.order, self.market_state)
         fill_quantity = min(self._remaining_quantity, available_quantity)
         if fill_quantity == 0:
-            return
+            return True
 
         self._fills.append(
             Fill(
@@ -157,6 +159,7 @@ class ExecutionEngine:
                 triggering_event_id=event.event_id,
             )
         )
+        return True
 
     def cancel(self, changed_at: datetime, reason: str) -> ExecutionResult:
         if self._state not in {OrderState.FILLED, OrderState.CANCELLED}:
@@ -214,15 +217,15 @@ class ExecutionEngine:
         )
 
 
-def simulate(order: OrderCommand, events: Iterable[MarketEvent]) -> ExecutionResult:
+def simulate(order: OrderCommand, events: Iterable[MarketEvent], entry_index: int = 0) -> ExecutionResult:
     ordered_events = tuple(events)
-    result = _simulate_once(order, ordered_events)
+    result = _simulate_once(order, ordered_events, entry_index)
 
     if order.latency_ms == 0:
         return result
 
     baseline_order = order.model_copy(update={"latency_ms": 0})
-    baseline = _simulate_once(baseline_order, ordered_events)
+    baseline = _simulate_once(baseline_order, ordered_events, entry_index)
     if result.metrics.average_fill_price is None or baseline.metrics.average_fill_price is None:
         latency_impact = None
     elif order.side is OrderSide.BUY:
@@ -233,10 +236,10 @@ def simulate(order: OrderCommand, events: Iterable[MarketEvent]) -> ExecutionRes
     return replace(result, metrics=replace(result.metrics, latency_impact=latency_impact))
 
 
-def _simulate_once(order: OrderCommand, events: tuple[MarketEvent, ...]) -> ExecutionResult:
+def _simulate_once(order: OrderCommand, events: tuple[MarketEvent, ...], entry_index: int = 0) -> ExecutionResult:
     engine = ExecutionEngine(order)
-    for event in events:
-        engine.process(event)
+    for index, event in enumerate(events):
+        engine.process(event, execute=index >= entry_index)
     return engine.finalize()
 
 

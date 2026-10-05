@@ -63,7 +63,10 @@ def publish_replay(
     dispatch: bool = True,
     playback_speed: float | None = None,
     events_per_second: float | None = None,
+    stop=None,
 ) -> int:
+    if not 0 <= scenario.entry_index <= len(scenario.events):
+        raise ValueError("entry index is outside the replay")
     if playback_speed is not None and playback_speed <= 0:
         raise ValueError("playback_speed must be positive")
     if events_per_second is not None and events_per_second <= 0:
@@ -86,6 +89,7 @@ def publish_replay(
                     "started_at": scenario.order.submitted_at.isoformat(),
                     "mode": mode,
                     "symbols": [scenario.order.symbol],
+                    "entry_index": scenario.entry_index,
                 }
             ),
         },
@@ -98,12 +102,18 @@ def publish_replay(
     )
     started_at = monotonic()
     for index, event in enumerate(events):
+        if stop is not None and stop.is_set():
+            raise RuntimeError("replay publication interrupted")
         offset = index / events_per_second if events_per_second else (
             (event.event_time - events[0].event_time).total_seconds() / playback_speed if playback_speed else 0
         )
         delay = started_at + offset - monotonic()
         if delay > 0:
-            sleep(delay)
+            if stop is not None:
+                if stop.wait(delay):
+                    raise RuntimeError("replay publication interrupted")
+            else:
+                sleep(delay)
         redis.xadd(stream, {"message_type": "market.event.v1", "payload": json.dumps(event.model_dump(mode="json"))})
     redis.xadd(stream, {"message_type": "replay.completed.v1", "payload": "{}"})
     record_metrics(
@@ -166,25 +176,28 @@ def run_engine(
     events: list[MarketEvent] = []
     result: ExecutionResult | None = None
     exhausted_ids = {entry_id for entry_id, _ in exhausted}
+    entry_index = 0
     for entry_id, message in redis.xrange(stream):
         if entry_id in exhausted_ids:
             continue
         try:
             message_type = message["message_type"]
-            if message_type == "order.command.v1":
+            if message_type == "replay.started.v1":
+                entry_index = int(json.loads(message["payload"]).get("entry_index", 0))
+            elif message_type == "order.command.v1":
                 engine = ExecutionEngine(OrderCommand.model_validate_json(message["payload"]))
             elif message_type == "market.event.v1":
                 if engine is None:
                     raise ValueError("market event arrived before its order command")
                 event = event_from_json(message["payload"])
-                engine.process(event)
+                engine.process(event, execute=len(events) >= entry_index)
                 events.append(event)
                 cache_market_state(redis, market_state_key(str(run_id), event.symbol), engine, event)
             elif message_type == "replay.completed.v1":
                 if engine is None:
                     raise ValueError("replay completed without an order command")
                 streamed_result = engine.finalize()
-                expected_result = simulate(engine.order, events)
+                expected_result = simulate(engine.order, events, entry_index)
                 result = replace(streamed_result, metrics=expected_result.metrics)
                 if result != expected_result:
                     raise AssertionError("streamed execution did not match pure execution")
@@ -318,14 +331,17 @@ def _claim_pending(
 ) -> tuple[list[tuple[str, dict[str, str]]], list[tuple[str, dict[str, str]]]]:
     claimed: list[tuple[str, dict[str, str]]] = []
     exhausted: list[tuple[str, dict[str, str]]] = []
-    for pending in redis.xpending_range(stream, group, "-", "+", 100):
-        if pending["time_since_delivered"] < recovery_idle_ms:
-            continue
-        messages = redis.xclaim(stream, group, consumer, recovery_idle_ms, [pending["message_id"]])
-        if pending["times_delivered"] >= max_deliveries:
-            exhausted.extend(messages)
-        else:
-            claimed.extend(messages)
+    cursor = "-"
+    while pending_batch := redis.xpending_range(stream, group, cursor, "+", 100):
+        for pending in pending_batch:
+            if pending["time_since_delivered"] < recovery_idle_ms:
+                continue
+            messages = redis.xclaim(stream, group, consumer, recovery_idle_ms, [pending["message_id"]])
+            if pending["times_delivered"] >= max_deliveries:
+                exhausted.extend(messages)
+            else:
+                claimed.extend(messages)
+        cursor = f"({pending_batch[-1]['message_id']}"
     return claimed, exhausted
 
 

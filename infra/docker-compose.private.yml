@@ -89,6 +89,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://tickertrace:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env.private}@postgres:5432/tickertrace
       PUBLIC_ALLOWED_ORIGINS: http://localhost:3030,http://127.0.0.1:3030
+      RECORDING_DIRECTORY: /app/recordings
+    volumes:
+      - ../recordings:/app/recordings
     ports:
       - "127.0.0.1:8030:8000"
     depends_on:

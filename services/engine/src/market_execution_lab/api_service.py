@@ -238,6 +238,9 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     if workers and mode == "private_live":
         raise ValueError("private live services must not use public Fly demand dispatch")
     live_limits = LiveLimits.from_environment() if mode == "private_live" else None
+    if mode == "private_live":
+        from market_execution_lab.recorded_api import install_recorded_routes
+        install_recorded_routes(app, redis, store, redis_url, database_url)
 
     def live_session():
         if mode != "private_live":
@@ -313,11 +316,14 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
         return await http_error(request, HTTPException(503, "data service unavailable; try again shortly"))
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error(_: Request, error: RequestValidationError) -> JSONResponse:
+    async def validation_error(request: Request, error: RequestValidationError) -> JSONResponse:
         request_id = request_id_context.get()
+        message = "request validation failed"
+        if mode == "private_live" and request.url.path.startswith(("/api/v1/recordings", "/api/v1/experiments")):
+            message = error.errors()[0]["msg"]
         return JSONResponse(
             status_code=422,
-            content={"error": {"code": "validation_error", "message": "request validation failed", "request_id": request_id}},
+            content={"error": {"code": "validation_error", "message": message, "request_id": request_id}},
             headers={"x-request-id": request_id},
         )
 
@@ -485,7 +491,7 @@ def create_app(database_url: str, redis_url: str, public_request_limit: int | No
     async def session_updates(websocket: WebSocket, run_id: UUID) -> None:
         await websocket.accept()
         replay = store.replay_for_run(run_id)
-        if replay is None or (replay.get("settings") and replay["settings"]["mode"] == "private_live" and mode != "private_live"):
+        if replay is None or (replay.get("settings") and replay["settings"]["mode"] != "public_replay" and mode != "private_live"):
             await websocket.close(code=1008)
             return
         last_payload = None
@@ -592,7 +598,7 @@ def _application_mode() -> str:
 
 def _replay_response(store: DatabaseStore, run_id: UUID, mode: str | None = None) -> ReplayResponse:
     result = store.replay_for_run(run_id)
-    if result is None or (mode == "public_replay" and result.get("settings") and result["settings"]["mode"] == "private_live"):
+    if result is None or (mode == "public_replay" and result.get("settings") and result["settings"]["mode"] != "public_replay"):
         raise HTTPException(status_code=404, detail="replay not found")
     return ReplayResponse.model_validate(result)
 

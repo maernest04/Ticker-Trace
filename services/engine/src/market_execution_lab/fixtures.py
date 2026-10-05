@@ -16,6 +16,7 @@ class ScenarioFixture:
     name: str
     order: OrderCommand
     events: tuple[MarketEvent, ...]
+    entry_index: int = 0
 
 
 def generated_scenarios() -> tuple[ScenarioFixture, ...]:

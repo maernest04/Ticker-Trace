@@ -8,6 +8,29 @@
 
 body { margin: 0; }
 
+.recorded-lab a { color: #00da73; }
+.terminal-header a { color: #00da73; font-size: 0.8rem; text-decoration: none; }
+.recorded-lab button:not(.submit-order) { background: #151815; border: 1px solid #343a36; color: #c3c9c4; cursor: pointer; padding: 5px 8px; }
+.recorded-lab button:disabled { cursor: default; opacity: 0.45; }
+.recorded-grid { display: grid; gap: 12px; grid-template-columns: minmax(240px, 0.7fr) minmax(0, 2fr); margin: 14px 0; }
+.recorded-controls, .recorded-timeline { padding: 18px; }
+.recorded-controls label { color: #9da49e; display: flex; flex-direction: column; font-size: 0.8rem; gap: 7px; margin: 12px 0; }
+.recorded-controls .permission { flex-direction: row; line-height: 1.5; }
+.recorded-controls .permission input { min-height: auto; }
+.recorded-fields { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.recorded-identity { color: #858b86; font-family: monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
+.recorded-outcomes { display: grid; gap: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.recorded-outcomes article, .recorded-explanation { background: #101210; border: 1px solid #303530; padding: 12px; }
+.recorded-outcomes dl div { display: flex; font-size: 0.8rem; gap: 10px; justify-content: space-between; padding: 6px 0; }
+.recorded-outcomes dd { font-family: monospace; margin: 0; }
+.recorded-explanation { border-left: 3px solid #00da73; font-size: 0.85rem; margin-top: 14px; }
+.recorded-timeline svg { display: block; height: 120px; width: 100%; }
+.recorded-table { overflow-x: auto; }
+.recorded-table table { border-collapse: collapse; font-family: monospace; font-size: 0.75rem; width: 100%; }
+.recorded-table td, .recorded-table th { border-bottom: 1px solid #252826; padding: 10px; text-align: left; }
+.recorded-table .divergence { background: #173324; }
+@media (max-width: 800px) { .recorded-grid { grid-template-columns: 1fr; } .recorded-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .recorded-lab .terminal-header { flex-wrap: wrap; gap: 12px; padding: 12px 0; } }
+
 button, input, select { font: inherit; }
 
 .terminal { background: #0a0b0a; margin: 0; min-height: 100vh; padding: 0 14px 12px; }

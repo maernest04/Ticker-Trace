@@ -7,3 +7,4 @@ __pycache__
 frontend/.next
 frontend/node_modules
 benchmarks
+recordings

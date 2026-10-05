@@ -2,6 +2,8 @@
 
 ## Current implementation boundary
 
+Private `/recorded` adds bounded capture/stop controls, account-permission acknowledgement, saved manifest/quality selection, one-symbol source-entry selection, standalone offline replay, and a two-column single-parameter comparison. It displays entry-relative and activation-relative times separately, first state/fill divergence, signed deltas, and original quote-linked fills. Source/decision tables use 100-row pages; fill evidence uses 20-row pages. The chart renders only the current source page and is not used to compute explanations. The latest experiment is restored after browser reload; failed/unready inputs never become successful comparison results. Public mode has no recording APIs or accessible private data.
+
 Public mode selects nine generated datasets, submits independent replay orders, compares configured latency against the same fixture at zero latency, and animates completed recorded traces at 1×/5×/20×. These controls do not change backend processing speed. Longer datasets show 300 events with dataset names distinguishing experiments for the same stock.
 
 Private mode uses a separate terminal component: live subscription controls (up to ten symbols), real quote/provider freshness enforced server-side, buy/sell market/limit ticket, continuous session snapshots, and durable fill-event explanations. Quotes older than 15 seconds disable the ticket; connection/backend errors are visible. No zero-latency counterfactual is offered against changing live conditions. Private mode has no account authentication and must be loopback/network protected.

@@ -352,6 +352,14 @@ service.main()
             original_fills = store.order_for_id(order_id)["fills"]
             process_ids = [process.pid for process in processes]
             for cycle in range(4):
+                wait_for(lambda: len(list(redis.scan_iter(match=f"live:owner:{run_id}:*"))) == 32 and
+                         (quote_time := redis.hget(f"state:replay:{run_id}:MSFT", "quote_ingested_at")) and
+                         time() - datetime.fromisoformat(quote_time).timestamp() < 5 and
+                         client.get("/api/v1/live/session").json()["fresh"])
+                probe = client.post("/api/v1/orders", json={"run_id": str(run_id), "symbol": "MSFT", "side": "buy", "order_type": "market", "quantity": 1})
+                assert probe.status_code == 202, probe.json()
+                probe_id = UUID(probe.json()["order_id"])
+                wait_for(lambda: (store.order_for_id(probe_id) or {}).get("final_state") == "filled")
                 for process in processes:
                     process.send_signal(signal.SIGSTOP)
                 try:

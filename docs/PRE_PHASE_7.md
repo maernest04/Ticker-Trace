@@ -1,5 +1,9 @@
 # Pre-Phase 7 Completion: A / B / C
 
+## October 5 recorded-market extension
+
+The new [Extension A/B/C section in IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons) is authoritative for recovery hardening, private recorded replay, and first-divergence comparisons. Earlier A/B/C work below is historical shipped functionality, not evidence of this extension's manual acceptance. Actual vendor recording/storage permission, actual saved-input offline acceptance, physical sleep/wake/network interruption, and a participant usability task remain distinct from generated automated/browser tests.
+
 ## Scope and boundaries
 
 Build the missing live execution path, meaningful generated experiments, and honest continuous-load validation before presenting the project. This is not post-trade reconciliation, real-money trading, or an exchange matching engine. Existing public Fly/Vercel services remain generated-only and idle-safe. Private live operation uses separate local/private infrastructure, explicit operator credentials, and ongoing resource usage. No production deployment or provider disruption is part of this implementation.

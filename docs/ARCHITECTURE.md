@@ -2,6 +2,14 @@
 
 ## Current implemented architecture — pre-Phase 7
 
+### Recorded-market extension
+
+Private FastAPI controls one bounded capture and one experiment job, with file locking preventing another API process from owning the same recording directory. Capture reads the existing Redis source; it never opens an Alpaca socket, changes subscriptions, trims streams, or extends their lifetime. A private bind-mounted directory stores immutable validated input, provenance, job state, canonical outcomes, and paged decision traces.
+
+Recorded jobs publish complete isolated source streams, then launch the existing engine and persistence entry points as separate bounded subprocesses. Each role has one retry against the same run/order IDs; acknowledgements follow recoverable results or database commits. Pending recovery scans all pages, not only the first 100 entries. API restart marks unfinished recording/jobs incomplete/failed; it does not claim automatic job resume. This is local process separation, not measured multi-machine scaling.
+
+The existing execution engine performs pre-entry warm-up without execution. It then applies identical order rules to each independent configuration. Comparison traces identify the earliest activation/eligibility/quantity/state difference and distinguish it from first fill divergence and final fills/state. Source identity, input checksum, market-time entry, model version, and configuration remain inspectable. Public generated behavior is unchanged; non-public run modes are denied by public reads and WebSockets.
+
 This section describes shipped code. The original proposal below is retained as historical design intent, not an implementation claim.
 
 ```text

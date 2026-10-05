@@ -319,6 +319,189 @@ The live browser checks, live-peak measurement and 600-second test at twice that
 
 Local A/B and Local C's available local engineering/evidence work are implemented. Actual-feed simulated execution, browser transitions, separate worker restarts, and the live-peak-sized benchmark passed October 5. Deliberate physical laptop/network suspension and resolution of the observed timing-sensitive lifecycle-test readiness failure remain open; do not claim those passed from narrower process/container tests or successful reruns.
 
+## Extension A / B / C — Recorded-Market Execution Comparisons
+
+Planning added October 5, 2026. This extension is the next implementation track, before final Phase 7 presentation. Nothing in the checklists below is implemented or accepted merely because this plan exists. The earlier Local A/B/C sections and October 5 benchmark remain historical evidence, not checklists to restart.
+
+Implementation requested for the entire extension on October 5. Engineering now includes bounded private capture, immutable validation, isolated offline subprocess replay, source-index entry boundaries, two-experiment first-divergence explanations, paged quote evidence, and `/recorded` UI. The full Python suite passed 168 tests, followed by 43 focused tests after the validation-message change. Five quiet and five isolated contended lifecycle repetitions passed. Evidence: [extension acceptance](../benchmarks/extension-abc-acceptance-2026-10-05.md). Remaining acceptance is tracked below; actual capture permission, physical suspension, and participant validation are not fabricated from generated tests.
+
+### Product outcome and scope
+
+Ticker Trace will let a private local user select a recorded stock-market interval, compare two simulated orders that differ in one parameter, and identify the first source event that explains their execution difference. The product is an inspectable execution-comparison tool, not another general stock dashboard, a trading recommendation, or a standalone fault-injection benchmark.
+
+Default decisions for this extension:
+
+- Retain execution simulation; do not add trade-book reconciliation.
+- Keep Python/FastAPI, Redis Streams/cache, PostgreSQL, Next.js/TypeScript, and Docker. Reuse the existing event contracts, execution rules, partitioning, and recovery code where they fit.
+- Keep live ingestion and recorded replay local/private. Recorded replay is not a public fixture source, does not use hosted dependencies, and must work without market-data credentials or internet once a recording has been saved.
+- Capture normalized events from the existing live pipeline; do not open another Alpaca connection. Historical REST import is deferred.
+- Allow at most one active capture, using one source run and at most two already-subscribed symbols. Comparisons select one symbol. End capture on run rollover or ingestion interruption; cross-session stitching and gap backfill are deferred.
+- Initial bounds: ten minutes, 80,000 market events, or 64 MiB per recording, whichever is reached first; 256 MiB aggregate private artifacts and ten saved experiments. Recorded finite admission allows at most 80,003 messages, below the existing live hard cap; public finite admission stays 10,000. Reject new work without storage headroom; never silently evict saved recordings or raise global limits. Recorded SQL history remains operator-managed, not subject to a certified disk quota.
+- Treat these bounds as v1 safety defaults, not performance guarantees. Recording endpoints must not automatically change subscriptions or continue recording after the user closes a capture interval.
+- Keep existing public generated demos and safeguards unchanged. Real-data files must be ignored by Git and excluded from public bundles/images. Confirm applicable account recording/storage permissions before actual vendor capture; public display/redistribution remains unapproved.
+- Preserve current top-of-book limitations: independent orders, no shared liquidity, queue priority, hidden depth, market impact, fees, or broker-exact fills. Comparisons describe the simulator, not what a real broker would necessarily have done.
+
+### Extension A — Recovery Correctness
+
+Goal: make the existing recovery evidence dependable, then establish reusable correctness checks for recorded replay. Reliability supports the product; it is not the new user-facing feature.
+
+#### A1 — Reproduce and fix lifecycle-test readiness
+
+Build/checklist:
+
+- [ ] Reproduce the October 5 failure in `test_ingestion_restart_and_three_rollovers_with_real_service_processes`; preserve the observed 17-versus-33 ownership-key result.
+- [x] Confirm whether the failure is test synchronization or worker behavior before changing application code. Fresh engine-cached quotes alone do not establish persistence readiness.
+- [x] Before pausing processes, wait with a bounded deadline for both roles to own all expected partitions in the current successor run and for a persisted probe to demonstrate progress.
+- [x] Retain process-liveness, unchanged-PID, unchanged-original-fill, and recovery assertions. Do not weaken expected ownership counts, add arbitrary sleeps, or increase retry budgets to hide failure.
+
+Verify/gate:
+
+- [x] Targeted lifecycle test passes five consecutive times without competing load.
+- [x] It passes five consecutive times while an isolated generated workload runs, using a separate test database/Redis namespace from acceptance evidence. Record workload and resource contention; do not silently discard failed attempts.
+- [x] Full Python suite passes against isolated local storage. Any application-code change must have a regression test reproducing its cause.
+
+#### A2 — Retry and commit-boundary audit
+
+Build/checklist:
+
+- [x] Inventory existing tests first; add only missing cases for duplicate commands/events, pending redelivery, and separate engine/persistence replacement.
+- [x] Verify source/result acknowledgements occur after their required durable or recoverable effects. Test failure before commit and commit-success followed by failure before acknowledgement.
+- [x] Verify reconstruction keeps the same fill IDs within the same run and cannot overwrite completed progress with an older snapshot.
+- [x] Check exclusive partition ownership, cooperative-lease limitations, missing-history failure, and bounded malformed-message/dead-letter behavior without introducing consensus or database fencing.
+
+Verify/gate:
+
+- [x] Each injected commit-boundary interruption recovers with the expected final state, quantities, and exactly one durable row per expected fill.
+- [x] A generated partial-fill order survives replacement and completes without changing previously persisted fills; a deliberate unfillable order remains unfilled rather than gaining fabricated fills.
+- [x] Duplicate delivery changes diagnostic counts, not execution outcomes. An intentional competing owner cannot process the same partition.
+- [x] Save scoped results separately from throughput benchmarks; avoid claiming universal exactly-once delivery or recovery from destroyed history.
+
+#### A3 — Local operational handoff
+
+- [ ] Verify dependency-ordered local startup and document the October 5 cold-boot failure. If unattended startup is claimed, prove it; otherwise retain the explicit operator startup procedure.
+- [ ] With the user's participation during actual fresh quotes, perform physical laptop sleep/wake and a bounded network interruption. Check renewed ownership, subscriptions, actual fresh cached quotes, subsequent simulated execution, and unchanged retained fills.
+- [ ] Restore any temporarily stopped services. Save failures as well as successes; do not substitute process/container suspension for physical sleep/wake.
+- [ ] Review startup/recovery limitations against recorded evidence before marking A complete.
+
+The original 17-versus-33 failure remains documented in PRE_PHASE_7.md; it was not independently re-created with that exact count during this extension. Initial readiness and shared-database contention failures, subsequent fixes, and all final repetitions are retained in the extension evidence. Local startup remains explicit/operator-assisted, not a new unattended cold-boot certification.
+
+Physical sleep/wake requires user participation and an active feed. Its absence does not block implementing B with generated test input, but remains an open acceptance item and must not be relabelled as passed.
+
+### Extension B — Private Recording and Deterministic Replay
+
+Goal: preserve a bounded real observed interval and replay it offline through the existing execution/persistence pipeline without corrupting live state or weakening public/private boundaries.
+
+#### B1 — Recording contracts, boundaries, and storage
+
+Build/checklist:
+
+- [x] Define a versioned immutable manifest and normalized event file under a private local recording directory. Manifest includes recording ID, source feed/run, symbols, capture boundaries, event count, available timestamp precision, units/normalization version, schema version, engine/model provenance, checksum, and completion/quality status.
+- [x] Base capture on retained source-stream entries with frozen start/end cursors per partition, not a second provider connection or a query sorted only by exchange timestamps. Preserve received per-symbol ordering, original identifiers, normalized prices/sizes, available event timestamps, and rejected/out-of-order limitations.
+- [x] Define one recording control record and explicit states: capturing, finalizing, ready, incomplete, failed. Finalization validates the complete bounded source range; only validated immutable artifacts become replayable.
+- [x] Separate capture wall time, source market time, and later replay ingestion time. Do not invent nanosecond precision lost by current normalization or claim that IEX observations represent the consolidated market.
+- [x] Audit where disconnects, rejected messages, source resets, and retention loss can be detected. Record known quality limitations; absence of a reported gap is not proof of a complete vendor feed.
+- [x] A user stop or normal time/event/byte bound may produce a ready bounded recording after validation; record its completion reason. On interruption/rollover or missing history, freeze the captured prefix and mark it incomplete rather than silently stitching sessions. Incomplete recordings remain visible but cannot be used for v1 comparisons.
+- [x] Add recording-file ignore/container-exclusion rules before any real capture. Enforce event/time/byte/disk limits without automatic deletion. Generated test recordings may be versioned; vendor recordings may not.
+
+Verify/gate:
+
+- [x] Contract tests reject malformed events, unknown versions, missing boundaries, ambiguous ordering, wrong symbols/units, checksum mismatches, truncated files, and oversized input.
+- [x] Simulated interrupted writes never yield a ready artifact. A ready manifest's counts/checksum match its immutable contents.
+- [x] Normal session retention never deletes a ready recording file, and saving a recording never deletes, trims, or prolongs active recovery streams.
+- [x] No secrets enter manifests or exported files. Public builds cannot discover/read recordings by ID, path, list endpoint, order lookup, or WebSocket.
+
+#### B2 — Bounded capture and offline replay services
+
+Build/checklist:
+
+- [x] Add private start/stop/status/list controls for capture. Freeze exact cursor boundaries, validate/export before retained history expires, and stop at the first configured bound. Do not read moving stream tails indefinitely or represent a missing source prefix as complete.
+- [x] Keep finalization bounded and outside a long-running browser request; expose progress/failure rather than marking queued work ready prematurely. Reuse current job/service mechanisms where correct, without adding a second orchestration framework.
+- [x] On rollover, dependency failure, disk exhaustion, or application restart, stop/mark the affected recording clearly; no automatic capture resume or source reconstruction from made-up events.
+- [x] Add a private recorded-replay source/run boundary independent of `LIVE_SESSION_KEY`, public fixture allowlists, and real-time freshness admission. Historical data must never appear as Fresh live quotes.
+- [x] Reuse the current engine, partitioning, caching, persistence, and finite replay path; validate local recorded-run limits separately without loosening public caps. Publish a complete immutable input before finite dispatch, retaining the current completed-run processing model.
+- [x] Define entry as an explicit insertion boundary in the selected symbol's source-entry order, with a recorded market-time anchor. Warm up only preceding market state, insert the order command at that boundary, and evaluate eligible subsequent events under existing rules. Never fill from pre-entry events, including earlier entries with equal timestamps, or use future quotes during warm-up. Preserve source ordering rather than sorting by timestamp.
+- [x] Generate isolated run/order identifiers per experiment while retaining original source-event references. Refresh replay ingestion timestamps for operational latency; preserve source market time for execution.
+- [x] Provide backend 1x/5x/20x/max publication pacing for the private local replay path. Keep client trace playback separately labelled; paced publication does not imply incremental finite engine execution.
+- [x] Persist the dataset checksum, entry anchor, order configuration, and model version with each experiment so results can be reproduced and compared. Keep recorded artifacts independent of temporary run-result retention.
+
+Verify/gate:
+
+- [x] Replay a generated test recording offline with no Alpaca credentials and no provider connection.
+- [x] Identical immutable inputs at different publication/playback speeds produce equivalent canonical outcomes: fill source references, prices/quantities, market-time transitions, remaining quantity, and metrics. Exclude new run/order IDs and operational wall-clock latency from cross-run equality.
+- [x] Worker replacement within one recorded run preserves that run's existing fill IDs and final canonical outcome. Lost/partial publication remains a failed run, not a successful truncated replay.
+- [ ] Live ingestion/registry/subscriptions remain unchanged while independent recorded experiments execute; public generated mode still passes its existing tests.
+- [x] Controlled stale/out-of-order/duplicate input is handled according to the existing rules and recorded in quality diagnostics; no silent timestamp sorting or liquidity invention.
+
+#### B3 — Private recording/replay UI and actual-data acceptance
+
+- [x] Add private capture controls and a saved-recording selector showing feed, symbols, interval, counts, quality status, and immutable dataset identity.
+- [x] Add a recorded-mode badge, one-symbol selection, market-time entry selection, simulated-order ticket, replay status, and durable quote-linked explanations.
+- [x] Show capturing/finalizing/incomplete/failed states and actionable errors. Disable replay for unready/corrupt recordings; never label recorded prices live.
+- [x] Use bounded/paged timeline reads and rendering for longer recordings; keep older triggering quotes retrievable without loading every event into the browser at once.
+- [x] Keep frontend private-filesystem access mediated by the API and safe server-selected IDs; never accept arbitrary paths from browser requests.
+- [ ] After account permission checks, capture one actual bounded IEX interval, stop capture, and demonstrate offline replay with immutable provenance. No real orders or public vendor screenshots are authorized by this checklist.
+- [x] Run Python/integration tests, frontend production build, and private/public browser regressions. Record actual-input acceptance separately from generated fixture tests.
+
+### Extension C — Two-Experiment Comparison and First Divergence
+
+Goal: explain a controlled difference in simulated execution using the same recording and shared entry point. This is the distinctive workflow to validate with a user, not a claim that replay or fill simulation is a new invention.
+
+#### C1 — Comparison contract and deterministic explanation
+
+Build/checklist:
+
+- [x] Define a comparison with one recording checksum/version, one symbol, one entry anchor, one side, one engine/model version, and two configurations. Runs have separate namespaces and independent liquidity under the current model.
+- [x] Support exactly one varied parameter in v1: quantity, artificial latency, limit price for two limit orders, or market versus limit type with the required limit price. Other fields stay fixed; reject ambiguous multi-parameter comparisons.
+- [x] Compare weighted fill price, fill rate/filled quantity, remaining quantity, existing spread cost, and activation-to-fill/completion times. Show configured latency and entry-to-fill time separately so existing activation-relative metrics are not mislabelled.
+- [x] Represent no fill/no completion with an explicit unavailable value, not zero. Do not invent a separate broker-slippage metric or subtract unavailable values.
+- [x] Compare event-indexed execution decisions from the same existing rules. Find the first source event where activation, eligibility, filled quantity, or terminal state differs; do not compare opaque fill IDs across independent runs or attribute every result to the final fill.
+- [x] Explain only supported rule-level causes: activation delay, limit eligibility, or order quantity versus displayed liquidity. Provide source event, values/configuration, and the rule; no LLM or unconstrained causal narrative.
+- [x] Distinguish first state divergence from first fill divergence and final outcome difference. Return explicit no-divergence/no-outcome-difference states when appropriate.
+- [x] Use canonical deterministic explanation data generated from/reconstructed by the engine; do not duplicate fill-rule logic in the frontend or build a separate simulator.
+
+Verify/gate:
+
+- [x] Generated scenarios cover each supported varied parameter, equal-timestamp boundaries, different partial-fill progress, no fills, identical final outcomes despite intermediate divergence, and no divergence.
+- [x] Explanation points to the earliest qualifying source event and matches both experiments' actual states, quotes, and parameters.
+- [x] Inverting baseline/variant reverses signed result deltas without changing the source identity of the divergence.
+- [x] Identical configurations form a test control with no divergence; different model/dataset/entry identities cannot be presented as a controlled comparison.
+- [x] Replacement/replay speed changes preserve canonical comparison results and explanations.
+
+#### C2 — Focused comparison UI
+
+- [x] Add baseline/variant configuration, a single changed-parameter control, two result columns, and an aligned recorded-event timeline.
+- [x] Highlight the first divergence and let the user inspect the responsible quote and decision on both sides. Keep timeline sampling separate from authoritative event-level explanation.
+- [x] Show both run states, dataset identity, entry point, model limitations, and data quality. If either run fails or is incomplete, display comparison failure rather than ranking its performance.
+- [x] Display signed deltas with units and side-aware price interpretation; lower prices are not automatically better for a sell order. Avoid investment recommendations or claims of real broker execution.
+- [x] Verify source-event lookup, reconnect/result recovery, invalid configuration, loading/no-data states, and responsive bounded rendering in the browser.
+- [ ] Regression-check existing live orders, standalone recorded replay, and public generated demos. Production frontend build and full isolated Python suite pass.
+
+#### C3 — User validation and presentation gate
+
+- [ ] Ask the user to recruit their stock-interested friend or another intended user; do not contact people or share private recordings without explicit authorization.
+- [ ] Give the participant a concrete task: select a saved interval, vary one parameter, identify which experiment differs, and explain the responsible event without terminal access.
+- [ ] Record observed task completion, time/help required, explanation accuracy, confusion, and an actual proposed reuse scenario. Distinguish interview intent from demonstrated repeat use; do not fabricate adoption metrics.
+- [ ] If the task is confusing or has no useful return reason, make the smallest evidence-backed workflow adjustment before adding features.
+- [x] Position the project as an auditable recorded-market execution comparison tool, not an unprecedented simulator or proven quant-company production tool.
+- [x] Use generated recordings for public screenshots/demo until vendor display permissions are established; keep actual recordings private and out of the repository.
+- [x] Update product/architecture/data/UI/setup descriptions and benchmark/resume claims only after the corresponding implementation and acceptance pass. Keep throughput, durability, playback speed, execution latency, user results, and recovery measurements separate.
+
+Engineering checks marked above use generated input. Public replay completed in the browser, and standalone/private replay is covered by API/subprocess tests. Simultaneous actual live ingestion and recorded experiments, an actual saved IEX interval, and fresh-live browser regression remain unchecked.
+
+Manual acceptance procedure: confirm account storage rights, start the documented local dependency-ordered stack, wait for actual fresh subscribed quotes, capture a short interval, stop it, and verify a ready checksum. Stop ingestion only after noting its prior state, replay the saved interval offline, inspect original quote-linked fills, and restore prior services. Never remove streams, leases, recordings, or database rows to make a check pass. For physical sleep/network testing, coordinate with the user during fresh quotes, record existing fill IDs, suspend/resume the laptop and separately interrupt/restore networking, then verify fresh quotes, renewed ownership and a subsequent simulated fill without duplicates. Record failures; do not claim automatic startup or physical recovery from subprocess tests.
+
+Participant task: with the user recruiting a consenting participant, use a generated saved interval, compare 0 ms versus 100 ms latency, and ask them to identify the first responsible quote and explain the outcome without terminal access. Record completion, elapsed time, help, explanation accuracy, confusion and a proposed reuse reason. No participant is contacted by this implementation.
+
+### Build order and completion rules
+
+1. A1 readiness fix and repeated tests → A2 commit/recovery gaps → A3 operational acceptance when the user/feed are available.
+2. B1 contracts and privacy/bounds → B2 generated offline service replay → B3 UI and actual recording acceptance.
+3. C1 deterministic comparison tests → C2 browser workflow → C3 observed user task → Phase 7 presentation.
+
+The original default was one numbered build batch at a time; the user's October 5 request explicitly authorized building the complete extension together. Test each layer and retain exact results, limitations, and a suggested commit message. Do not run Git commands. A planning/documentation commit is not an implementation or acceptance result.
+
+No new cloud deployment, multi-machine scaling, historical downloader, full-depth model, shared-liquidity matching, reconciliation ledger, portfolio, arbitrary parameter sweep, authentication system, or public raw-data publication belongs to this extension. Missing rights, live feed, physical-suspension participation, or user-validation access must remain explicit blockers to the relevant acceptance, not substituted generated passes. Existing bounded recovery assumptions and known timing/normalization limitations remain visible until evidence resolves them.
+
 ## Phase 7: Project Presentation
 
 ### 7A — Technical Documentation

@@ -4,6 +4,14 @@ A deployable stock-execution laboratory for explaining simulated market/limit fi
 
 The system is an educational and research simulator. It does not place real orders, provide investment recommendations, reconstruct full Level 2 books, or claim exchange-accurate fills.
 
+## Private recorded execution comparisons
+
+The local `/recorded` laboratory captures a bounded interval from the existing ingestion connection, then runs one simulation or two independent experiments against that immutable input. Change quantity, artificial latency, limit price, or market/limit type; inspect the first source event where execution differs and each fill's original quote. This is an auditable comparison workflow, not a claim of novel replay technology or proven trader demand.
+
+Recordings use validated JSONL plus a versioned SHA-256 manifest, retain source-entry order and available market timestamps, and remain outside Git and container images. Saved input replays offline through Redis and separate engine/persistence subprocesses into PostgreSQL. Entry boundaries exclude earlier equal-time events; pacing does not change canonical outcomes. Public APIs and WebSockets cannot read private recorded runs.
+
+Capture requires account recording/storage permission confirmation. Bounds are ten minutes, 80,000 events, or 64 MiB per recording; aggregate private artifacts are limited to 256 MiB and ten saved experiments. No saved recording is automatically evicted. Captures interrupted by rollover, restart, or history loss are not successful replays. Actual IEX recording acceptance, physical sleep/wake, and observed user validation remain separate gates in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons).
+
 ## Project Goals
 
 - Help technically curious traders and quant students understand how timing and visible liquidity affect order execution.

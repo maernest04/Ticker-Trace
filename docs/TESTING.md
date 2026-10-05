@@ -1,5 +1,15 @@
 # Testing Strategy
 
+## Recorded-market extension verification
+
+`tests/test_recorded_replay.py` covers versioned manifest/content validation, checksum/count/source-boundary corruption, equal-time entry exclusion, recorded source order, stale/duplicate diagnostics, capture caps/rollover/history loss/restart, offline subprocess replay, deterministic repeated execution, paged source/fill/trace evidence, and public REST/WebSocket denial. Generated inputs are explicitly labelled and are not actual IEX acceptance.
+
+`tests/test_commit_boundaries.py` interrupts engine result publication, source commits, and fill commits both before and after their effects, then reconstructs partial orders and verifies stable original fills, completion quantities, and duplicate suppression. Finite source commit recovery covers more than 100 pending messages. Existing ownership, malformed/dead-letter, missing-history, rollback, replacement, and stale-snapshot tests remain the baseline.
+
+The lifecycle pause test now waits for all engine/persistence leases, a fresh successor-symbol quote, and a persisted probe before suspension. Repetitions must have a dedicated PostgreSQL database, not merely a separate Redis DB: retention tests intentionally prune globally eligible closed sessions and can delete another concurrent test's evidence. Keep the generated workload, lifecycle repetitions, browser preview, and regression suite isolated. Record failures and subsequent corrections separately; never interpret container pause as physical laptop sleep/wake.
+
+Full isolated regression run on October 5: **168 passed**, with the existing Starlette/httpx deprecation warning; the final validation-message change subsequently passed all **43 focused extension tests**. Five quiet and five isolated contended lifecycle repetitions passed. Browser verification uses a generated 300-event recording, never a vendor recording, and includes comparison completion, source paging, restored results, and a 390-pixel responsive overflow check. Public replay also completed in the browser. See [extension evidence](../benchmarks/extension-abc-acceptance-2026-10-05.md) for failures, exact repetitions, and remaining manual gates.
+
 ## Pre-Phase 7 implementation coverage
 
 The older unchecked strategy lists below describe desired scope, not proof of completion. New tests cover non-finalizing live snapshots, zero-valued metric round trips, deterministic longer datasets, size/latency differences, CLI pacing, public live-endpoint rejection, symbol bounds, fatal authentication, transient reconnect/malformed-message handling, subscription-task cleanup, quote freshness, ongoing live order execution, partition-owner rejection, pending reconstruction, and continuous backlog/durable-latency measurement.

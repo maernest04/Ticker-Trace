@@ -514,7 +514,7 @@ function PrivateLiveTerminal() {
   }
 
   return <main className="terminal">
-    <header className="terminal-header"><div className="brand"><strong>Market Execution Lab</strong></div><span className="mode">Private live · Alpaca IEX</span><span className="connection">{connection}</span></header>
+    <header className="terminal-header"><div className="brand"><strong>Market Execution Lab</strong></div><a href="/recorded">Recorded comparisons</a><span className="mode">Private live · Alpaca IEX</span><span className="connection">{connection}</span></header>
     {error ? <p className="notice error" role="alert">{error}</p> : null}
     <section className="terminal-grid">
       <aside className="watchlist panel"><div className="panel-heading"><h2>Live watchlist</h2></div>
