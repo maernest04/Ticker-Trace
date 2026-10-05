@@ -299,9 +299,9 @@ Implementation and generated acceptance passed: 120 total tests and the frontend
 ### Local C — Final Evidence and Presentation Readiness
 
 - [x] Run the full Python suite and frontend production build after Local A/B/C changes: 125 passed; production build passed.
-- [ ] Repeat the local browser workflow with actual quotes, parameterized simulated orders, reconnects, and stale-feed protection.
-- [ ] Measure a nonzero active-window peak for the documented symbol set.
-- [ ] Offer twice that measured rate for at least 600 seconds using isolated local generated load; retain offered-rate, active backlog, drain, latency, duplicate/loss, and error evidence.
+- [x] Repeat the local browser workflow with actual quotes, parameterized simulated orders, reconnects, and stale-feed protection. October 5: actual fresh quotes, browser-submitted fill, market/limit orders with artificial latency, separate engine/persistence restarts, stale API rejection, browser disabled-to-Fresh transition after ingestion restoration, and automatic browser reconnect after API stop/start all passed.
+- [x] Measure a nonzero active-window peak for the documented symbol set. October 5: AAPL/MSFT Alpaca IEX, 1,483 events over 60.24 seconds, peak 141 events/sec.
+- [x] Offer twice that measured rate for at least 600 seconds using isolated local generated load; retain offered-rate, active backlog, drain, latency, duplicate/loss, and error evidence. October 5: 169,200 events, 282/sec target, 281.97/sec offered, 37.57 ms p95 persistence latency, zero final backlog/lost/duplicate events/worker errors. See `benchmarks/local-c-live-acceptance-2026-10-05.md` and its JSON artifact.
 - [x] Record hardware, software versions, partition/worker settings, local-thread versus separate-process methodology, and dataset/source-hash identifiers without invoking Git.
 - [x] Keep in-memory dedupe, finite replay throughput, continuous durable-write latency, and real-feed execution as separate claims.
 - [x] Review vendor permission before public visuals: public-display permission remains unresolved; publish generated data only. No raw live-data publication performed.
@@ -309,7 +309,7 @@ Implementation and generated acceptance passed: 120 total tests and the frontend
 - [x] Verify stopping the local stack stops ingestion/workers while retaining database data; browser close alone is not shutdown. Existing five fills survived stop/start.
 - [x] Add targeted lease-expiry recovery and test repeated process pauses plus an actual container pause beyond the normal 30-second leases, with no process replacements after the final fix. Physical laptop/network suspension remains a separate check.
 
-Acceptance requires the still-unchecked market-window workflow, nonzero live peak, and 600-second test at twice that measured peak. A separately labelled synthetic endurance run does not replace those checks. Cloud redeployment, owner-only hosting, public concurrency, and 24-hour hosted idle-usage checks are deferred, not passed or required for this local-first milestone. The executable market-window runbook is in `PRE_PHASE_7.md`.
+The live browser checks, live-peak measurement and 600-second test at twice that measured peak passed October 5. Remaining acceptance includes deliberate physical sleep/wake/network recovery. A concurrent regression run also exposed a lifecycle ownership-readiness assertion failure; the individual test and subsequent complete suite (125 tests) passed after the benchmark ended, but the timing-sensitive failure remains unresolved. Preserve all results. Cloud redeployment, owner-only hosting, public concurrency, and 24-hour hosted idle-usage checks are deferred, not passed or required for this local-first milestone. The executable market-window runbook is in `PRE_PHASE_7.md`.
 
 ### Execution Order
 
@@ -317,7 +317,7 @@ Acceptance requires the still-unchecked market-window workflow, nonzero live pea
 2. Local B lifecycle and retention → accelerated rollover/failure checks.
 3. Local C ten-minute evidence and documentation → Phase 7 presentation.
 
-Local A/B and Local C's available local engineering/evidence work are implemented. Local C's actual-market acceptance, live-peak-sized benchmark, and deliberate physical laptop/network suspension drill remain pending; do not claim those passed from process/container tests or the arbitrary-rate endurance run.
+Local A/B and Local C's available local engineering/evidence work are implemented. Actual-feed simulated execution, browser transitions, separate worker restarts, and the live-peak-sized benchmark passed October 5. Deliberate physical laptop/network suspension and resolution of the observed timing-sensitive lifecycle-test readiness failure remain open; do not claim those passed from narrower process/container tests or successful reruns.
 
 ## Phase 7: Project Presentation
 

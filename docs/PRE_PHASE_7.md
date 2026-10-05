@@ -67,7 +67,7 @@ Current direction as of October 2, 2026: local live execution is the primary pro
 
 - [x] Short local continuous-load tests validate the harness, including insufficient rate/backlog/failure cases.
 - [x] Save fresh local evidence with explicit methodology; do not relabel old thread benchmarks as distributed-machine scaling.
-- [ ] Measure an actual private live peak, then certify twice that offered rate for at least 600 seconds. External market-window acceptance.
+- [x] Measure an actual private live peak, then certify twice that offered rate for at least 600 seconds. October 5: measured 141/sec AAPL/MSFT IEX peak; 169,200 generated events at a 282/sec target over 600 seconds, zero lost/duplicate events, drained backlog, and no worker errors. See [local acceptance evidence](../benchmarks/local-c-live-acceptance-2026-10-05.md).
 - [ ] Deferred cloud acceptance: redeploy explicitly, complete a public browser smoke test and five concurrent submissions, and verify exact worker counts return to idle.
 - [ ] Deferred cloud acceptance: observe 24 hours without dashboard traffic and record Fly machine state, Upstash command/bytes, and Supabase size/egress deltas. No scheduled app probes.
 
