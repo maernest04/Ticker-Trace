@@ -1,5 +1,7 @@
 # Extension A/B/C engineering evidence — October 5, 2026
 
+Subsequent actual private capture/offline comparison acceptance passed on October 6; see [the separate actual-input evidence](extension-live-recording-acceptance-2026-10-06.md). October 5 blocked attempts below remain historical and are not erased. Owner usability and physical laptop/network recovery are still unverified.
+
 Scope: local generated-input correctness, private recording/replay services, controlled comparison, and UI. This is not actual IEX recording acceptance, physical laptop recovery, multi-machine certification, or user-demand validation. The authoritative checklist is in `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Automated verification
@@ -38,6 +40,16 @@ Model: source-ordered, independent top-of-book simulations, not consolidated pri
 
 ## Remaining acceptance
 
-Actual account recording/storage permission is unconfirmed, so no actual vendor capture was started. A permission-confirmed saved IEX interval must be captured and replayed offline, with simultaneous live/recorded isolation checked. Physical laptop sleep/wake and network interruption require the user's participation and fresh quotes. A consenting participant must complete the comparison task before usefulness or repeat demand can be claimed. Operator-assisted startup is documented; unattended cold-boot recovery is not newly certified.
+### Subsequent permission and acceptance attempt
+
+The user reports Alpaca approved the requested bounded personal/local recording and offline replay. Approval is recorded as user-reported and does not authorize public vendor display, redistribution or a commercial service. The user chose to perform owner usability acceptance; independent participant validation remains optional/unverified. The generated preview was inspected and restored for that walkthrough; no owner result has yet been reported.
+
+At 13:56 Pacific, the existing ordinary local Docker stack was stopped. Redis/PostgreSQL were started without recreation, then existing migration/ingestion/engine/persistence containers resumed. The expired previous session drained and activated `035540eb-2841-4d98-97bb-9601877cf0d3`; the engine became ready against it. IEX settings were confirmed as `wss://stream.data.alpaca.markets/v2/iex` with AAPL/MSFT. The registry reported connected but `received_at=0` throughout checks until 14:00:32 Pacific, including one single-service ingestion reconnect. No actual event, fresh quote, capture, or simulated fill was verified. The reason for no events is not established; reaching regular market close is not itself a diagnosis. Actual capture/offline replay and simultaneous live/recorded isolation remain blocked.
+
+Application image builds were initiated for the already-shipped API/UI. The frontend production image built successfully. Package installation reported one moderate and two high npm vulnerability advisories; no audit-fix or dependency/code change was authorized or applied. Backend image build status is recorded separately below. The original live services are restored to their initially stopped state, without removing volumes, leases or history. Dedicated generated-preview dependencies remain running locally.
+
+Both local API and frontend image builds subsequently completed with exit zero. Existing application containers were not replaced or claimed to run these images; imports of the recording/replay contracts and router passed in a disposable network-disabled API image smoke check. The Docker build resolved newer backend packages under existing ranges; the earlier full regression results do not certify this newly resolved image's complete integration behavior. No lockfile, dependency specification, or application code was edited. A dependency audit/remediation is a separate follow-up, not an authorized expansion of this acceptance run.
+
+At the initial engineering verification, account recording/storage permission was unconfirmed, so no actual vendor capture was started. The subsequent user-reported permission is recorded above. A saved IEX interval still must be captured and replayed offline, with simultaneous live/recorded isolation checked. Physical laptop sleep/wake and network interruption require the user's participation and fresh quotes. Owner acceptance is now the presentation gate; independent participant usefulness and repeat demand remain unverified. Operator-assisted startup is documented; unattended cold-boot recovery is not newly certified.
 
 The user's ordinary local live stack was already stopped before this extension and was not started. Existing retained data was not deleted, Git commands were not run, real trades were not placed and hosted resources were not used. The generated preview and dedicated local test dependencies remain running for inspection.

@@ -4,6 +4,8 @@
 
 The new [Extension A/B/C section in IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons) is authoritative for recovery hardening, private recorded replay, and first-divergence comparisons. Earlier A/B/C work below is historical shipped functionality, not evidence of this extension's manual acceptance. Actual vendor recording/storage permission, actual saved-input offline acceptance, physical sleep/wake/network interruption, and a participant usability task remain distinct from generated automated/browser tests.
 
+October 6 update: under user-reported personal recording permission, [actual capture/offline comparison acceptance passed](../benchmarks/extension-live-recording-acceptance-2026-10-06.md). The saved 680-event interval reproduced canonical results at different publication pacing with SQL-verified unique quote-linked fills and unchanged live registry/subscriptions. Owner usability, fresh-live browser regression and physical laptop/network recovery remain unverified; independent user demand is not claimed. Private recordings are ignored/excluded and ordinary local services were stopped afterward.
+
 ## Scope and boundaries
 
 Build the missing live execution path, meaningful generated experiments, and honest continuous-load validation before presenting the project. This is not post-trade reconciliation, real-money trading, or an exchange matching engine. Existing public Fly/Vercel services remain generated-only and idle-safe. Private live operation uses separate local/private infrastructure, explicit operator credentials, and ongoing resource usage. No production deployment or provider disruption is part of this implementation.

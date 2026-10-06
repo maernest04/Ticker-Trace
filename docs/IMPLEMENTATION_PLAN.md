@@ -329,6 +329,14 @@ Implementation requested for the entire extension on October 5. Engineering now 
 
 Ticker Trace will let a private local user select a recorded stock-market interval, compare two simulated orders that differ in one parameter, and identify the first source event that explains their execution difference. The product is an inspectable execution-comparison tool, not another general stock dashboard, a trading recommendation, or a standalone fault-injection benchmark.
 
+Scope frozen by user request on October 5, 2026. No new features, infrastructure, model expansion, or architecture work before the remaining acceptance and Phase 7 presentation. Only fixes required by a reproducible acceptance failure are in scope; any broader change requires explicit user approval. The shipped A/B/C engineering and generated-data evidence are the baseline, not a reason to restart implementation.
+
+Acceptance attempt at 13:49 Pacific on October 5: the local Docker daemon was unavailable (`docker.sock` missing), so service readiness and actual capture could not be checked. Account-specific private recording/storage permission is still unconfirmed; no permission checkbox was asserted, provider connection opened, or capture started. A consenting participant is not yet available, so no task completion, explanation accuracy, or reuse evidence is claimed. Finish these gates with the user; do not replace them with another generated benchmark. Public positioning continues to distinguish local multi-process workers, scoped recovery tests, generated throughput evidence, and top-of-book model limitations from multi-machine scaling, universal exactly-once delivery, broker-realistic results, novelty, or proven demand.
+
+Subsequent user decision: the user reports Alpaca approved the specifically requested personal/local recording and offline replay, with no redistribution, public data display or commercial service. Treat this as user-reported permission for that use, not independently reviewed written permission or public rights. The user chose owner acceptance instead of requiring an independent participant before presentation; independent usefulness/demand validation remains optional and unverified. No owner task result is accepted until the user actually completes and reports the walkthrough.
+
+At 13:56–14:00 Pacific, Docker was available. Existing local dependencies and workers resumed without deleting retained history, and an expired session rolled to `035540eb-2841-4d98-97bb-9601877cf0d3`. The single IEX connection reported connected with AAPL/MSFT, but the new registry's `received_at` remained zero through 14:00:32, including one controlled ingestion reconnect. No actual events or fresh quotes were verified; no recording or simulated order was submitted. This is a blocked live gate, not a passed capture, and the cause of the no-event stream is not established. The ordinary live services are restored to their prior stopped state; the separate generated preview remains available for owner testing. See extension evidence for this attempt.
+
 Default decisions for this extension:
 
 - Retain execution simulation; do not add trade-book reconciliation.
@@ -429,7 +437,7 @@ Verify/gate:
 - [x] Replay a generated test recording offline with no Alpaca credentials and no provider connection.
 - [x] Identical immutable inputs at different publication/playback speeds produce equivalent canonical outcomes: fill source references, prices/quantities, market-time transitions, remaining quantity, and metrics. Exclude new run/order IDs and operational wall-clock latency from cross-run equality.
 - [x] Worker replacement within one recorded run preserves that run's existing fill IDs and final canonical outcome. Lost/partial publication remains a failed run, not a successful truncated replay.
-- [ ] Live ingestion/registry/subscriptions remain unchanged while independent recorded experiments execute; public generated mode still passes its existing tests.
+- [x] Live ingestion/registry/subscriptions remain unchanged while independent recorded experiments execute; public generated mode still passes its existing tests. Actual coexistence verified October 6; public checks remain the separately recorded generated regressions.
 - [x] Controlled stale/out-of-order/duplicate input is handled according to the existing rules and recorded in quality diagnostics; no silent timestamp sorting or liquidity invention.
 
 #### B3 — Private recording/replay UI and actual-data acceptance
@@ -439,7 +447,7 @@ Verify/gate:
 - [x] Show capturing/finalizing/incomplete/failed states and actionable errors. Disable replay for unready/corrupt recordings; never label recorded prices live.
 - [x] Use bounded/paged timeline reads and rendering for longer recordings; keep older triggering quotes retrievable without loading every event into the browser at once.
 - [x] Keep frontend private-filesystem access mediated by the API and safe server-selected IDs; never accept arbitrary paths from browser requests.
-- [ ] After account permission checks, capture one actual bounded IEX interval, stop capture, and demonstrate offline replay with immutable provenance. No real orders or public vendor screenshots are authorized by this checklist.
+- [x] After account permission checks, capture one actual bounded IEX interval, stop capture, and demonstrate offline replay with immutable provenance. No real orders or public vendor screenshots are authorized by this checklist. October 6 actual acceptance passed under user-reported approval; files remain private.
 - [x] Run Python/integration tests, frontend production build, and private/public browser regressions. Record actual-input acceptance separately from generated fixture tests.
 
 ### Extension C — Two-Experiment Comparison and First Divergence
@@ -486,7 +494,7 @@ Verify/gate:
 - [x] Use generated recordings for public screenshots/demo until vendor display permissions are established; keep actual recordings private and out of the repository.
 - [x] Update product/architecture/data/UI/setup descriptions and benchmark/resume claims only after the corresponding implementation and acceptance pass. Keep throughput, durability, playback speed, execution latency, user results, and recovery measurements separate.
 
-Engineering checks marked above use generated input. Public replay completed in the browser, and standalone/private replay is covered by API/subprocess tests. Simultaneous actual live ingestion and recorded experiments, an actual saved IEX interval, and fresh-live browser regression remain unchecked.
+Most engineering checks above use generated input. October 6 actual acceptance additionally verified a 680-event AAPL/MSFT capture, unchanged live registry/subscriptions during comparison, offline reproducibility at another publication pace, SQL fill/event correctness, original quote evidence and unchanged completed results after API restart. See [actual recording acceptance](../benchmarks/extension-live-recording-acceptance-2026-10-06.md). Public replay completed in the earlier browser check, and standalone/private replay has separate API/subprocess coverage. Owner usability, fresh-live browser regression, and physical sleep/wake/network acceptance remain unchecked; no independent demand validation is claimed.
 
 Manual acceptance procedure: confirm account storage rights, start the documented local dependency-ordered stack, wait for actual fresh subscribed quotes, capture a short interval, stop it, and verify a ready checksum. Stop ingestion only after noting its prior state, replay the saved interval offline, inspect original quote-linked fills, and restore prior services. Never remove streams, leases, recordings, or database rows to make a check pass. For physical sleep/network testing, coordinate with the user during fresh quotes, record existing fill IDs, suspend/resume the laptop and separately interrupt/restore networking, then verify fresh quotes, renewed ownership and a subsequent simulated fill without duplicates. Record failures; do not claim automatic startup or physical recovery from subprocess tests.
 
