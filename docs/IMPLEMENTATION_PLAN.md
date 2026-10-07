@@ -512,24 +512,26 @@ No new cloud deployment, multi-machine scaling, historical downloader, full-dept
 
 ## Phase 7: Project Presentation
 
+Completed October 7, 2026 as local-first presentation work, not a claim that all operational acceptance passed. Evidence: [Phase 7 verification](../benchmarks/phase-7-presentation-2026-10-07.md). No Git publication, cloud deployment, new throughput run, or actual-market acceptance was performed in this phase. Scope remains frozen; physical sleep/network recovery, unattended cold boot, post-extension fresh-live browser regression, and owner usability stay open. Independent demand and multi-machine scaling are not claimed.
+
 ### 7A — Technical Documentation
 
-- [ ] Add an architecture diagram.
-- [ ] Document important tradeoffs and limitations.
+- [x] Add an architecture diagram in ARCHITECTURE.md for the implemented live, recorded, cache, and durable paths.
+- [x] Document important tradeoffs and limitations; distinguish historical proposals from shipped behavior.
 
 **Verification:** The README explains the user value, architecture, data modes, and model limitations accurately.
 
 ### 7B — Demonstration and Benchmarks
 
-- [ ] Add UI screenshots or a short demonstration.
-- [ ] Publish measured performance results with methodology.
+- [x] Add generated-only UI screenshots and a reproducible walkthrough in DEMO.md.
+- [x] Present measured performance results and methodology in BENCHMARKS.md, linked to existing raw artifacts. Prepared in repository files; external Git publication remains user-managed.
 
 **Verification:** A reviewer can see the end-to-end workflow and independently interpret benchmark conditions.
 
 ### 7C — Resume and Interview Narrative
 
-- [ ] Write final resume bullets using measured values only.
-- [ ] Prepare a concise explanation of concurrency, partitioning, idempotency, caching, and recovery tradeoffs.
-- [ ] Verify all public project claims match the deployed behavior and test evidence.
+- [x] Write final resume bullets using measured values only; keep the 200/sec and 282/sec latency results separate.
+- [x] Prepare an interview explanation of concurrency, partitioning, idempotency, caching, and recovery tradeoffs.
+- [x] Review presentation claims against implemented local behavior and dated test evidence; do not claim current cloud verification or production adoption.
 
 **Verification:** Another engineer can understand, run, and evaluate the project from the repository documentation.

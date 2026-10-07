@@ -345,7 +345,7 @@ The real local feed smoke test is recorded below. Remaining cloud checks are def
 | Check | Evidence to record | Status |
 | --- | --- | --- |
 | Real IEX simulated fill | Active-window run/order/event IDs; provider quote time; persisted fill and UI explanation | Verified locally October 2, including automatic same-session worker replacement; see PRE_PHASE_7.md |
-| Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Pending Local C |
+| Ten-minute rate certification | Nonzero measured peak; target = twice peak; offered rate/backlog/latency JSON with configuration | Passed October 5: 141/sec sampled peak; 282/sec generated target; 169,200 events; 37.57 ms p95 market-event commit. See benchmarks/local-c-live-acceptance-2026-10-05.md |
 | New public browser workflow | Deployed backend/frontend versions; 300-event experiment, parameter comparison, final persisted result | Deferred cloud acceptance |
 | Five concurrent submissions | Five outcomes; exact one machine per worker group; no extra/spare machines | Deferred cloud acceptance |
 | Idle worker/API shutdown | Worker stop after grace period; API autostop after browser close | Deferred cloud acceptance |

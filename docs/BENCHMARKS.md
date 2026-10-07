@@ -1,5 +1,19 @@
 # Benchmark Methodology
 
+## Published results at a glance
+
+| Workload | Input / duration | Result | Evidence |
+| --- | --- | --- | --- |
+| Finite replay thread comparison | 8 partitions × 1,000 generated events | 1,143 → 2,152 events/sec, 1 → 4 local threads; 8 threads regress to 2,010/sec | [Raw record](../benchmarks/phase-5b.json) |
+| Arbitrary-rate endurance | 120,000 generated events / 600 seconds, target 200/sec | 8.06 ms p95 enqueue-to-market-event commit; zero lost/duplicate durable events | [Raw record](../benchmarks/local-c-endurance.json) |
+| Sample-relative certification | 169,200 generated events / 600 seconds, target 282/sec | 281.97/sec offered, 37.57 ms p95; zero lost/duplicate durable events and final backlog | [Raw record](../benchmarks/local-c-live-rate-2026-10-05.json), [methodology](../benchmarks/local-c-live-acceptance-2026-10-05.md) |
+| Engine-only duplicate injection | 1,000,000 generated events, 10,000 injected duplicate IDs | Zero duplicate fills; not a million-event durable pipeline | [Raw record](../benchmarks/phase-5c-engine.json) |
+| Actual private recording | 680 AAPL/MSFT observations; comparisons at different pacing | Canonical outcomes reproduced; SQL-verified fills and API-restart retention | [Redacted acceptance](../benchmarks/extension-live-recording-acceptance-2026-10-06.md) |
+
+These are historical local measurements, not a fresh benchmark or production SLA. October 5 measured a 141/sec one-second peak over a 60.24-second IEX subscription sample; certification used generated input, not continuous live market load. The two endurance latencies cannot be interchanged. The continuous harness uses local threads in one process even though application roles are separate processes.
+
+The October 5 run shared an Apple M3/16 GiB host and eight-CPU Docker VM with the live stack and overlapping tests. p50/p95/p99: 2.21/37.57/123.26 ms; maximum engine/persistence backlog: 28/33; steady slope: -0.00772 messages/sec; no worker errors. A concurrent lifecycle test failed, with failed and subsequently passed evidence preserved. The extension added readiness checks and passed five isolated contended repetitions. Physical suspension remains unverified.
+
 ## Scope
 
 The Phase 5B harness measures generated replay runs through Redis Streams, the execution engine, and PostgreSQL persistence. It compares fixed symbol partitions with one or more concurrent benchmark workers.
@@ -31,7 +45,7 @@ Configuration: 8 fixed partitions, 1,000 generated events per partition, local R
 | 4 | 2,152 | 310 | 1,360 | 0 |
 | 8 | 2,010 | 547 | 3,015 | 0 |
 
-The first observed bottleneck is local PostgreSQL persistence contention: throughput stops improving from four to eight workers while p95 persistence time more than doubles. This result applies only to the documented local configuration. The complete machine-readable record is [`benchmarks/phase-5b.json`](../benchmarks/phase-5b.json).
+Local PostgreSQL persistence contention is the inferred bottleneck: throughput stops improving from four to eight workers while p95 persistence processing time more than doubles. This is an inference from timings, not a separate database profiler result, and applies only to the documented local configuration. The complete record is [`benchmarks/phase-5b.json`](../benchmarks/phase-5b.json).
 
 ## Phase 5C Validation
 

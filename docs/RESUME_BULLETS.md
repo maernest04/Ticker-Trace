@@ -1,20 +1,22 @@
 # Resume Bullets
 
-## Project
+## Final compact version
 
-**Market Execution Lab — Python, FastAPI, Redis Streams, PostgreSQL, Next.js, Docker**
+**Ticker Trace — Python, FastAPI, asyncio, Redis Streams, PostgreSQL, Next.js, Docker**
 
-## Draft Bullets
+Use these three bullets together:
 
-- Built a deployable stock-execution lab with generated replay experiments and a separate private Alpaca IEX pipeline, tracing simulated market/limit fills to their triggering quotes
-- Engineered independently runnable Python consumers with Redis Streams, PostgreSQL, freshness checks, and retained-event recovery; validated `[X]` events through the documented local continuous-load workload
-- Implemented deterministic replay, partial fills, and latency comparisons in Next.js; measured `[X]%` higher finite-replay throughput across `[X]` concurrent local benchmark threads
+- Built a stock-execution simulator with asyncio and Redis Streams, routing Alpaca IEX data through independent workers
+- Sustained 120K generated events over 10 minutes with 8.06 ms p95 PostgreSQL write latency and zero lost or duplicate events
+- Built a Next.js replay lab with immutable recordings, quote-linked fills, and first-divergence latency comparisons
 
-## Alternative UI-Focused First Bullet
+## Alternative benchmark bullet
 
-- Built and deployed a generated-data stock-execution dashboard for comparing order size and latency, visualizing spread cost, fill rate, and quote-linked execution outcomes
+- Persisted 169.2K generated events over 10 minutes at a 282/sec target with 37.57 ms p95 write latency and zero event loss
 
-## Verified Local Evidence Bullets — October 2
+Choose one benchmark bullet; never combine the rate from one test with the latency from another. Line length depends on resume fonts/margins; these are compact prose, not a verified LaTeX layout.
+
+## Historical local evidence — October 2
 
 - Built a Python/FastAPI stock-execution simulator with private Alpaca IEX streaming, Redis caching, PostgreSQL, and a Next.js UI; verified five live-quote-linked simulated fills without duplicates
 - Sustained 120K generated events over 10 minutes through Redis Streams and PostgreSQL using four partitions and concurrent local consumers; measured 8.06 ms p95 durable-write latency with zero lost or duplicate events
@@ -33,6 +35,8 @@ The latency bullet measures enqueue-to-market-event commit, not fill or browser 
 - Cache hit rate
 - Queue depth and consumer lag under peak load
 
-Do not replace `[X]` placeholders until the corresponding result has been measured with a reproducible benchmark.
+Only add metrics after collecting reproducible evidence. Cache hit rate, fill/browser p95, and recovery duration have no final measured claims here.
 
-The original saved finite-replay result used local threads, not distributed processes. The one-million-event check is in-memory only. The pre-Phase 7 continuous smoke result is short local evidence, not sustained real-feed or production performance. Do not claim historical vendor-data replay, a deployed private-live UI, end-to-end fill/browser p95 latency, or 24-hour quota safety until separately verified.
+The original finite-replay result used local threads, not multiple machines. Million-event dedupe is in-memory only. Actual private capture/offline reproduction passed October 6 under user-reported storage permission; see [actual-input evidence](../benchmarks/extension-live-recording-acceptance-2026-10-06.md). Recovery tests cover scoped retries/commit boundaries, not physical laptop recovery or exactly-once transport. Do not claim production adoption, validated demand, profitability, exchange-exact fills, a hosted private-live UI, fill/browser p95, or 24-hour quota safety.
+
+Metric sources: [200/sec endurance JSON](../benchmarks/local-c-endurance.json), [282/sec certification JSON](../benchmarks/local-c-live-rate-2026-10-05.json), and [recovery evidence](../benchmarks/extension-abc-acceptance-2026-10-05.md). Both continuous tests use four partitions and two local threads per consumer role. Latency ends at PostgreSQL market-event commit, not fill-result commit or browser delivery.

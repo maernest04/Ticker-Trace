@@ -1,6 +1,42 @@
 # Architecture
 
-## Current implemented architecture — pre-Phase 7
+## Current implemented architecture
+
+```mermaid
+flowchart LR
+    A[Private Alpaca IEX WebSocket] --> I[Async ingestion and normalization]
+    I --> S[Run-scoped symbol partitions: Redis Streams]
+    U[Next.js UI] --> API[FastAPI REST and WebSockets]
+    API -->|Order commands| S
+    S --> E[Execution process: partition leases]
+    S --> P[Persistence process: separate consumer group]
+    E --> R[Redis results and state cache]
+    R --> P
+    P --> DB[(PostgreSQL: events and quote-linked fills)]
+    R --> API
+    DB --> API
+    S -->|Bounded read-only capture| F[Private JSONL and SHA-256 manifest]
+    F --> J[Isolated recorded experiment runs]
+    J --> S
+    API -->|Snapshots and first-divergence evidence| U
+```
+
+Recorded runs use distinct namespaces and bounded subprocesses, not the live registry. Public generated fixtures enter replay without Alpaca or private files. This diagram shows responsibilities, not measured multi-host deployment.
+
+### Implemented tradeoffs
+
+| Choice | Benefit | Cost or limit |
+| --- | --- | --- |
+| Redis Streams over Kafka | Small local stack, consumer groups, pending delivery | Retained Redis history is required for reconstruction |
+| At-least-once delivery plus stable identities | Scoped retry/restart correctness | Not exactly-once transport; cooperative leases do not fence in-flight SQL |
+| Fixed symbol partitions | Per-partition source order and concurrent unrelated work | Hot symbols can bottleneck; no in-run repartitioning |
+| Redis cache | Fast quote/order reads | Freshness checks required; no general SQL-to-cache rebuild service |
+| PostgreSQL over TimescaleDB | Relational fill/quote joins and ordinary migrations | Time-series extension deferred until measured needs justify it |
+| Local-first private mode | Actual feed and saved input without hosted resources | Operator startup, vendor rights, unverified laptop suspension |
+| Independent top-of-book orders | Deterministic controlled experiments | No shared liquidity, queue priority, depth, fees, or broker-exact fills |
+| Publish then process finite replay | Canonical outcomes across publication pacing | Not incremental streaming execution capacity |
+
+Actual recording/offline comparisons passed October 6. Recovery tests do not certify physical suspension, automatic cold boot, user demand, or multi-machine scaling.
 
 ### Recorded-market extension
 

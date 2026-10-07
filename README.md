@@ -1,6 +1,10 @@
-# Market Execution Lab
+# Ticker Trace
 
-A deployable stock-execution laboratory for explaining simulated market/limit fills, visible liquidity, spread cost, time to fill, and artificial latency. The public demo runs deterministic generated stock scenarios. A separate private deployment connects ongoing Alpaca IEX quotes to independently runnable engine and persistence workers.
+A local-first stock-execution laboratory: submit simulated market/limit orders against private Alpaca IEX quotes, or replay a saved interval and explain the first event where two configurations diverge. Redis Streams separates ingestion, execution, and persistence; Next.js makes the triggering quotes inspectable. Generated scenarios provide a public-safe demo without vendor credentials. Online hosting is deferred.
+
+![Generated NVDA execution comparison](docs/assets/generated-comparison.png)
+
+The screenshot uses generated prices, not live market data. See the [reproducible demo](docs/DEMO.md), [architecture and tradeoffs](docs/ARCHITECTURE.md), and [measured results](docs/BENCHMARKS.md).
 
 The system is an educational and research simulator. It does not place real orders, provide investment recommendations, reconstruct full Level 2 books, or claim exchange-accurate fills.
 
@@ -10,7 +14,7 @@ The local `/recorded` laboratory captures a bounded interval from the existing i
 
 Recordings use validated JSONL plus a versioned SHA-256 manifest, retain source-entry order and available market timestamps, and remain outside Git and container images. Saved input replays offline through Redis and separate engine/persistence subprocesses into PostgreSQL. Entry boundaries exclude earlier equal-time events; pacing does not change canonical outcomes. Public APIs and WebSockets cannot read private recorded runs.
 
-Capture requires account recording/storage permission confirmation. Bounds are ten minutes, 80,000 events, or 64 MiB per recording; aggregate private artifacts are limited to 256 MiB and ten saved experiments. No saved recording is automatically evicted. Captures interrupted by rollover, restart, or history loss are not successful replays. Actual IEX recording acceptance, physical sleep/wake, and observed user validation remain separate gates in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons).
+Capture requires account recording/storage permission confirmation. Bounds are ten minutes, 80,000 events, or 64 MiB per recording; aggregate private artifacts are limited to 256 MiB and ten saved experiments. No saved recording is automatically evicted. Interrupted captures are not successful replays. Actual private capture/offline acceptance passed October 6 under user-reported personal-use permission. Physical sleep/wake, post-extension fresh-live browser regression, and owner usability remain unverified in the [implementation plan](docs/IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons).
 
 ## Project Goals
 
@@ -21,7 +25,7 @@ Capture requires account recording/storage permission confirmation. Bounds are t
 - Produce reproducible performance and reliability results suitable for technical interviews and resume bullets.
 - Remain small enough for one developer to build, deploy, test, and explain thoroughly.
 
-## Planned Documentation
+## Documentation
 
 - [Product specification](docs/PRODUCT_SPEC.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
@@ -33,6 +37,8 @@ Capture requires account recording/storage permission confirmation. Bounds are t
 - [Benchmark methodology](docs/BENCHMARKS.md)
 - [Resume bullets and benchmark metrics](docs/RESUME_BULLETS.md)
 - [Pre-Phase 7 build and acceptance checklist](docs/PRE_PHASE_7.md)
+- [Generated demo walkthrough](docs/DEMO.md)
+- [Interview narrative and claim boundaries](docs/INTERVIEW.md)
 
 ## Current Status
 
@@ -55,7 +61,9 @@ Capture requires account recording/storage permission confirmation. Bounds are t
 - [x] Complete Local A bounded lease retry, graceful cleanup, and reconstruction ownership renewal.
 - [x] Complete Local B coordinated session rollover and bounded closed-session retention, with generated-process acceptance tests.
 - [x] Complete Local C lease-expiry recovery, pause/shutdown checks, 125-test regression suite, and ten-minute synthetic endurance evidence.
-- [ ] Complete Local C market-window/suspension checks and ten-minute certification at twice the measured live peak.
+- [x] Verify live fills/restarts and ten-minute generated certification at twice a measured subscription-specific live peak on October 5.
+- [x] Verify actual private recording, offline comparison, and API-restart result retention on October 6.
+- [ ] Verify physical laptop/network recovery, post-extension fresh-live browser regression, and independent owner workflow completion.
 - [ ] Deferred cloud acceptance: redeployed concurrent-browser and 24-hour idle-provider-usage checks.
 
 ## Technology Stack
@@ -73,7 +81,8 @@ TimescaleDB is deferred until measured historical-query or retention requirement
 
 ## Data Modes
 
-- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. Actual quote-linked fills and automatic same-session worker replacement were verified locally October 2. Coordinated rollover/retention and ingestion resume are implemented and tested with generated service processes; post-update actual-feed execution, physical suspension, and sustained-rate certification remain pending.
+- **Private live mode:** operator-owned Alpaca IEX feed, continuous partition workers, simulated orders against subsequent quotes, and a private UI. Use separate local/private infrastructure, never the public Fly app. October 5 verified actual quote-linked market/limit fills, worker replacement, stale-feed rejection, and browser reconnection. Physical suspension and post-extension fresh-live browser regression remain open.
+- **Private recorded mode:** `/recorded` uses bounded immutable saved input, isolated replay runs, and original quote-linked explanations. October 6 actual-input acceptance passed; replay needs local dependencies but no active provider connection.
 - **Public demo mode:** nine generated datasets without vendor credentials. Fly demand dispatch finishes engine and persistence work before returning the completed snapshot; the browser animates the recorded trace. This is not live stock pricing or intermediate-worker streaming.
 
 ## Run the Execution Workspace
@@ -98,7 +107,7 @@ Each order is an independent top-of-book experiment, not a shared-liquidity matc
 
 Private sessions roll after 30 minutes, 90,000 messages in a partition, or 240 orders by default, leaving headroom below the unchanged hard caps. Rollover blocks new orders, drains closing boundaries, preserves fills and explicitly cancels remainders, then activates one durable successor. Closed Redis history expires after a 15-minute recovery grace; non-triggering PostgreSQL events expire one hour after closure, and order/fill explanations after 24 hours. These are configurable retention settings, not disk-quota guarantees. Worker replacement reconstructs retained input; missing active source history fails closed. Use Compose `stop`/`start`, not `down`, to retain the existing Redis container's recovery data.
 
-October 2 actual IEX testing first exposed a surviving-lease startup failure, fixed by Local A. Local B then automatically closed the capped session, preserved all five quote-linked fills, and activated one successor that both workers followed. Local C adds targeted in-process lease-expiry recovery, including an ingestion Redis timeout only when lease loss is independently confirmed. Final regression: 125 tests passed and the production frontend build passed. Generated service processes completed three rollovers and four pause/resume cycles without changing PIDs or duplicating fills; actual container pause recovery also avoided Docker restarts. Full stack stop/start preserved the five original fills. Multi-day operation, deliberate physical laptop/network suspension, and post-update fresh Alpaca execution remain unverified. See [the recorded evidence](docs/PRE_PHASE_7.md).
+October 2 actual IEX testing exposed a surviving-lease startup failure, fixed by Local A. Local B added coordinated rollover and retention; Local C added targeted lease-expiry recovery. October 5 actual-feed checks passed, followed by the extension's 168-test suite, 43 focused tests, and five quiet plus five isolated contended lifecycle repetitions. October 6 verified private recording and offline reproduction. These are dated checks, not indefinite uptime guarantees. Physical laptop/network recovery, owner usability, and post-extension fresh-live browser regression remain unverified. See [the recorded evidence](docs/PRE_PHASE_7.md).
 
 ## Evidence and Limitations
 
@@ -106,4 +115,6 @@ The original local thread benchmark increased throughput from approximately 1,14
 
 The million-event duplicate-fill check is in-memory only. Public worker failures leave bounded abandoned runs; public resubmission creates a new run rather than automatically resuming it. Idle shutdown reduces resource use but does not guarantee zero billing or free-tier safety under arbitrary traffic.
 
-The [Local C endurance record](benchmarks/local-c-endurance.json) persisted 120,000 generated events over 600 seconds at approximately 200 events/sec, with 8.06 ms p95 enqueue-to-PostgreSQL-market-event-commit latency, zero lost/duplicate events, and zero final backlog. It uses four partitions and two local threads per consumer role, not multi-machine scaling. This arbitrary-rate synthetic workload is not the still-pending certification at twice an active-market peak. Public demo visuals should use generated data until account-specific vendor display permission is established.
+The [200/sec endurance record](benchmarks/local-c-endurance.json) persisted 120,000 generated events over 600 seconds with 8.06 ms p95 enqueue-to-market-event-commit latency. The separate [October 5 certification](benchmarks/local-c-live-rate-2026-10-05.json) persisted 169,200 generated events at a 282/sec target for 600 seconds, with 37.57 ms p95, zero lost/duplicate durable events, zero final backlog, and no worker errors. Its target was twice a measured 141/sec one-second peak from a 60-second AAPL/MSFT IEX sample, not twice the market's maximum rate. Both use four partitions and two local threads per consumer role, not multiple machines. Never combine the higher rate with the lower latency from the other run.
+
+Private recordings and vendor screenshots must not be published. The demo above uses generated input. This workflow is an auditable execution comparison, not validated trader demand or a claim that replay technology itself is novel.

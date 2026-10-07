@@ -1,5 +1,7 @@
 # Pre-Phase 7 Completion: A / B / C
 
+October 7 presentation update: Phase 7 documentation is in README, ARCHITECTURE, BENCHMARKS, DEMO, RESUME_BULLETS, and INTERVIEW. The generated 300-event NVDA comparison completed in a separate local preview; screenshots contain no vendor data. Phase 7 packages the existing implementation/evidence; it does not close physical sleep/network recovery, owner usability, reliable unattended startup, or post-extension fresh-live browser acceptance. Hosting and independent demand remain deferred/unverified.
+
 ## October 5 recorded-market extension
 
 The new [Extension A/B/C section in IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md#extension-a--b--c--recorded-market-execution-comparisons) is authoritative for recovery hardening, private recorded replay, and first-divergence comparisons. Earlier A/B/C work below is historical shipped functionality, not evidence of this extension's manual acceptance. Actual vendor recording/storage permission, actual saved-input offline acceptance, physical sleep/wake/network interruption, and a participant usability task remain distinct from generated automated/browser tests.
